@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '@/components/shell/PageHeader'
 import { Card, SectionHeading, Badge, Avatar } from '@/components/ui/primitives'
-import { useAuth } from '@/app/auth'
+import { apiUrl, useAuth } from '@/app/auth'
 import { type Cohort } from '@/lib/cohorts'
 
 interface Classmate {
@@ -40,7 +40,7 @@ export function MyCohortPage() {
       setLoading(true)
       try {
         if (role !== 'student') return
-        const response = await fetch('/api/student/cohort', { credentials: 'include' })
+        const response = await fetch(apiUrl('/api/student/cohort'), { credentials: 'include' })
         const context = await response.json() as { cohort: Cohort | null; classmates: Classmate[] }
         if (!response.ok) throw new Error('Unable to load your cohort.')
         if (cancelled) return

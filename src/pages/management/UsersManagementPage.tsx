@@ -42,7 +42,7 @@ import {
 import { StudentVerificationQueue } from '@/components/management/StudentVerificationQueue'
 import { sendStudentApprovedNotification } from '@/lib/notifications'
 import { supabase } from '@/lib/supabase'
-import { isPlatformAdminEmail } from '@/app/auth'
+import { apiUrl, isPlatformAdminEmail } from '@/app/auth'
 import type { Role } from '@/types'
 import { useAuth } from '@/app/auth'
 
@@ -96,7 +96,7 @@ export function UsersManagementPage() {
 
   const loadApplicationAccounts = useCallback(async () => {
     try {
-      const response = await fetch('/api/admin/accounts', { credentials: 'include' })
+      const response = await fetch(apiUrl('/api/admin/accounts'), { credentials: 'include' })
       const payload = await response.json() as { users?: ApplicationAccount[] }
       if (!response.ok) throw new Error('Unable to load application accounts.')
       setApplicationAccounts(payload.users ?? [])
@@ -130,7 +130,7 @@ export function UsersManagementPage() {
           supabase.from('profiles').select('*').order('created_at', { ascending: false }),
           supabase.from('students').select('*'),
           supabase.from('teachers').select('*'),
-          fetch('/api/admin/accounts', { credentials: 'include' }),
+          fetch(apiUrl('/api/admin/accounts'), { credentials: 'include' }),
         ])
 
         const profiles = profilesRes.data ?? []
@@ -310,7 +310,7 @@ export function UsersManagementPage() {
   const handleApproveStudent = async (student: PendingStudentVerification) => {
     if (applicationAccounts.some((account) => account.id === student.id)) {
       try {
-        const response = await fetch(`/api/admin/accounts/${student.id}/approval`, {
+        const response = await fetch(apiUrl(`/api/admin/accounts/${student.id}/approval`), {
           method: 'PATCH', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'approved' }),
         })
         if (!response.ok) throw new Error('Unable to approve the application account.')
@@ -380,7 +380,7 @@ export function UsersManagementPage() {
   const handleRejectStudent = async (student: PendingStudentVerification) => {
     if (applicationAccounts.some((account) => account.id === student.id)) {
       try {
-        const response = await fetch(`/api/admin/accounts/${student.id}/approval`, {
+        const response = await fetch(apiUrl(`/api/admin/accounts/${student.id}/approval`), {
           method: 'PATCH', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'rejected' }),
         })
         if (!response.ok) throw new Error('Unable to reject the application account.')
@@ -424,7 +424,7 @@ export function UsersManagementPage() {
   const handleApproveAllStudents = async () => {
     const pendingApplicationAccounts = applicationAccounts.filter((account) => account.approval_status === 'pending')
     if (pendingApplicationAccounts.length > 0) {
-      await Promise.all(pendingApplicationAccounts.map((account) => fetch(`/api/admin/accounts/${account.id}/approval`, {
+      await Promise.all(pendingApplicationAccounts.map((account) => fetch(apiUrl(`/api/admin/accounts/${account.id}/approval`), {
         method: 'PATCH', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'approved' }),
       })))
       await loadApplicationAccounts()
@@ -568,7 +568,7 @@ export function UsersManagementPage() {
     setIsChangeRoleModalOpen(false)
 
     if (applicationAccounts.some((account) => account.id === targetUserId)) {
-      const response = await fetch(`/api/admin/accounts/${targetUserId}/role`, {
+      const response = await fetch(apiUrl(`/api/admin/accounts/${targetUserId}/role`), {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },

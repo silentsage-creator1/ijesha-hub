@@ -17,7 +17,7 @@ import { Avatar, Badge, Card, SectionHeading } from '@/components/ui/primitives'
 import { Modal } from '@/components/ui/Modal'
 import { Field } from '@/components/ui/Field'
 import { supabase } from '@/lib/supabase'
-import { useAuth } from '@/app/auth'
+import { apiUrl, useAuth } from '@/app/auth'
 import { officialCourses } from '@/lib/courses'
 import { getAllCohorts, type Cohort as StoredCohort } from '@/lib/cohorts'
 import {
@@ -113,7 +113,7 @@ export function AttendancePage() {
       setError(null)
       try {
         if (isStudent) {
-          const response = await fetch('/api/student/attendance', { credentials: 'include' })
+          const response = await fetch(apiUrl('/api/student/attendance'), { credentials: 'include' })
           const context = await response.json() as {
             cohort: StoredCohort | null
             student: Student | null

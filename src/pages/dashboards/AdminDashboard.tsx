@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom'
 import { PageHeader } from '@/components/shell/PageHeader'
 import { Card, SectionHeading } from '@/components/ui/primitives'
 import { StatCard, ActivityFeed, type ActivityRow } from '@/components/dashboard/blocks'
-import { useAuth } from '@/app/auth'
+import { apiUrl, useAuth } from '@/app/auth'
 import { supabase, supabaseConfigured } from '@/lib/supabase'
 import {
   getPendingStudentVerifications,
@@ -146,7 +146,7 @@ export function AdminDashboard() {
 
   const loadAppAccounts = useCallback(async () => {
     try {
-      const response = await fetch('/api/admin/accounts', { credentials: 'include' })
+      const response = await fetch(apiUrl('/api/admin/accounts'), { credentials: 'include' })
       const payload = await response.json() as { users?: AppAccount[]; error?: string }
       if (!response.ok) throw new Error(payload.error || 'Unable to load application accounts.')
       setAppAccounts(payload.users ?? [])
@@ -159,7 +159,7 @@ export function AdminDashboard() {
   const setAppAccountApproval = async (account: AppAccount, status: 'approved' | 'rejected') => {
     setConfirmingId(account.id)
     try {
-      const response = await fetch(`/api/admin/accounts/${account.id}/approval`, {
+      const response = await fetch(apiUrl(`/api/admin/accounts/${account.id}/approval`), {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },
