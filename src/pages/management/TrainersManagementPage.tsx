@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   GraduationCap,
   Search,
@@ -20,18 +20,17 @@ import {
 import { PageHeader } from '@/components/shell/PageHeader'
 import { Card, Badge } from '@/components/ui/primitives'
 import {
-  getStoredTrainers,
   saveStoredTrainers,
   type TrainerRecord,
   logSystemActivity,
 } from '@/lib/management'
-import { useAuth } from '@/app/auth'
+import { apiUrl, useAuth } from '@/app/auth'
 
 export function TrainersManagementPage() {
   const { user, profile, role } = useAuth()
   const canManage = role === 'admin' || role === 'manager'
 
-  const [trainers, setTrainers] = useState<TrainerRecord[]>(getStoredTrainers())
+  const [trainers, setTrainers] = useState<TrainerRecord[]>([])
   const [selectedTrainerId, setSelectedTrainerId] = useState<string | null>(null)
 
   // Filters
@@ -62,6 +61,41 @@ export function TrainersManagementPage() {
 
   const [selectedCourseToAssign, setSelectedCourseToAssign] = useState('Cyber Security')
   const [selectedCohortToAssign, setSelectedCohortToAssign] = useState('Cohort A')
+
+  useEffect(() => {
+    let active = true
+    async function loadTrainers() {
+      try {
+        const response = await fetch(apiUrl('/api/admin/accounts'), { credentials: 'include' })
+        if (!response.ok) throw new Error('Unable to load trainer accounts.')
+        const payload = await response.json() as { users?: Array<{ id: string; full_name: string; email: string; role: string; track?: string | null; approval_status?: string; created_at?: string }> }
+        if (!active) return
+        setTrainers((payload.users ?? [])
+          .filter((account) => account.role === 'trainer')
+          .map((account): TrainerRecord => ({
+            id: account.id,
+            fullName: account.full_name || account.email,
+            email: account.email,
+            phone: '—',
+            specialty: account.track || '—',
+            status: account.approval_status === 'approved' ? 'active' : 'inactive',
+            courses: [],
+            cohorts: [],
+            studentsCount: 0,
+            sessionsTotal: 0,
+            sessionsCompleted: 0,
+            attendanceRate: 0,
+            performanceRating: 0,
+            joinDate: account.created_at ? new Date(account.created_at).toLocaleDateString() : '—',
+            bio: '—',
+          })))
+      } catch {
+        if (active) setTrainers([])
+      }
+    }
+    void loadTrainers()
+    return () => { active = false }
+  }, [])
 
   // Selected trainer
   const selectedTrainer = useMemo(() => {

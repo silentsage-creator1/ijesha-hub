@@ -27,6 +27,7 @@ import { CohortDetailPage } from '@/pages/CohortDetailPage'
 import { CertificatesPage } from '@/pages/CertificatesPage'
 import { LearningWorkspacePage } from '@/pages/LearningWorkspacePage'
 import { MyCohortPage } from '@/pages/MyCohortPage'
+import { AppCoursesPage } from '@/pages/AppCoursesPage'
 
 export function AppRoutes() {
   return (
@@ -47,7 +48,7 @@ export function AppRoutes() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/org-settings" element={<SettingsPage />} />
         <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/courses" element={<CollectionPage title="Courses" subtitle="Course catalogue and cohort assignments." table="courses" fields={[{ key: 'name', label: 'Course' }]} managerRoles={['admin', 'manager']} />} />
+        <Route path="/courses" element={<AppCoursesPage />} />
         <Route path="/cohorts" element={<CohortsPage />} />
         <Route path="/my-cohorts" element={<CohortsPage />} />
         <Route path="/my-cohort" element={<MyCohortPage />} />
