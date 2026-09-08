@@ -1,0 +1,135 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+/* ==========================================================================
+   DESIGN TOKENS — "Harbor & Ember" system
+   A deep harbor-blue ink for structure and trust, warm ember for momentum
+   and achievement moments. Built for a digital training platform that
+   needs to read as professional software AND feel motivating to learners.
+   ========================================================================== */
+@theme {
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-certificate: 'Cinzel', serif;
+
+  /* Ink / navy scale — sidebar, headings, high-emphasis surfaces */
+  --color-ink-950: #0B1524;
+  --color-ink-900: #10192B;
+  --color-ink-800: #182642;
+  --color-ink-700: #22355A;
+  --color-ink-600: #2E4876;
+  --color-ink-500: #3E5D96;
+  --color-ink-400: #6C85B3;
+  --color-ink-300: #A2B3D2;
+  --color-ink-200: #CBD5EA;
+  --color-ink-100: #E6EBF5;
+  --color-ink-50:  #F3F5FA;
+
+  /* Harbor blue — primary brand / interactive */
+  --color-harbor-700: #1E3A6E;
+  --color-harbor-600: #26478A;
+  --color-harbor-500: #2A4B8D;
+  --color-harbor-400: #4A6BB0;
+  --color-harbor-100: #E3E9F7;
+
+  /* Ember — accent for momentum, streaks, achievements */
+  --color-ember-600: #D96A1F;
+  --color-ember-500: #FF8A3D;
+  --color-ember-400: #FFA766;
+  --color-ember-100: #FFEBDA;
+
+  /* Status */
+  --color-success-600: #17915E;
+  --color-success-500: #1FAA73;
+  --color-success-100: #DDF3EA;
+  --color-warning-600: #B3820A;
+  --color-warning-500: #E2A400;
+  --color-warning-100: #FBF0D2;
+  --color-danger-600: #C93A3E;
+  --color-danger-500: #E5484D;
+  --color-danger-100: #FBDFDF;
+
+  /* Neutrals / surfaces */
+  --color-paper: #F6F7FB;
+  --color-surface: #FFFFFF;
+  --color-line: #E4E8F1;
+
+  --shadow-card: 0 1px 2px rgba(16, 25, 43, 0.04), 0 4px 16px rgba(16, 25, 43, 0.06);
+  --shadow-pop: 0 8px 30px rgba(16, 25, 43, 0.14);
+
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink-900);
+    font-family: var(--font-body);
+  }
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-harbor-500);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: var(--color-ember-100);
+  }
+}
+
+@layer components {
+  .input {
+    width: 100%;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-line);
+    background: var(--color-paper);
+    padding: 0.55rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--color-ink-900);
+  }
+  .input:focus {
+    outline: none;
+    background: white;
+    border-color: var(--color-harbor-400);
+    box-shadow: 0 0 0 3px var(--color-harbor-100);
+  }
+  .input::placeholder {
+    color: var(--color-ink-400);
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: var(--color-ink-200);
+    border-radius: 999px;
+  }
+  .skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 100;
+    background: var(--color-ink-900);
+    color: white;
+    padding: 10px 16px;
+    border-radius: 8px;
+  }
+  .skip-link:focus {
+    left: 12px;
+    top: 12px;
+  }
+}

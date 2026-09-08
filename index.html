@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function () {
+        window.addEventListener(
+          'error',
+          function (event) {
+            if (
+              event &&
+              event.message &&
+              event.message.includes('fetch') &&
+              event.message.includes('getter')
+            ) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              return true;
+            }
+          },
+          true
+        );
+
+        try {
+          var origDefineProperty = Object.defineProperty;
+          Object.defineProperty = function (target, prop, descriptor) {
+            if (
+              (target === window ||
+                target === Window.prototype ||
+                (typeof globalThis !== 'undefined' && target === globalThis) ||
+                (typeof self !== 'undefined' && target === self)) &&
+              prop === 'fetch'
+            ) {
+              if (descriptor && descriptor.get && !descriptor.set) {
+                var currentVal;
+                try {
+                  currentVal = descriptor.get.call(target);
+                } catch (_) {}
+                descriptor.set = function (val) {
+                  currentVal = val;
+                };
+                var origGet = descriptor.get;
+                descriptor.get = function () {
+                  return currentVal !== undefined ? currentVal : origGet.call(this);
+                };
+                descriptor.configurable = true;
+              }
+            }
+            return origDefineProperty.call(this, target, prop, descriptor);
+          };
+
+          var desc =
+            Object.getOwnPropertyDescriptor(window, 'fetch') ||
+            Object.getOwnPropertyDescriptor(Window.prototype, 'fetch');
+          if (desc && desc.get && !desc.set) {
+            var _fetch = window.fetch;
+            origDefineProperty(window, 'fetch', {
+              get: function () {
+                return _fetch;
+              },
+              set: function (fn) {
+                _fetch = fn;
+              },
+              configurable: true,
+              enumerable: true,
+            });
+          }
+        } catch (_) {}
+      })();
+    </script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IJESHA DIGITAL HUB</title>
+    <meta name="description" content="Digital Training Management Platform for students, trainers, managers, and parents." />
+    <meta property="og:title" content="IJESHA DIGITAL HUB" />
+    <meta property="og:description" content="Digital Training Management Platform for students, trainers, managers, and parents." />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
