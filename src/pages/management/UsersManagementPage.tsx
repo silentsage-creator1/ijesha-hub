@@ -405,19 +405,6 @@ export function UsersManagementPage() {
     showToast(`Registration request for ${student.fullName} has been rejected.`, 'info')
   }
 
-  // Delete/dismiss student verification request
-  const handleDeleteVerification = async (student: PendingStudentVerification) => {
-    deletePendingStudentVerification(student.id)
-    await purgeUserByEmailOrName({
-      email: student.email,
-      name: student.fullName,
-      adminName: profile?.full_name || user?.name || 'Administrator',
-    })
-    setPendingVerifications(getPendingStudentVerifications())
-    setUsers(getStoredUsers())
-    showToast(`Verification record for ${student.fullName} (${student.email}) has been deleted.`, 'success')
-  }
-
   // Delete individual user
   const handleDeleteSingleUser = async (targetUser: ManagedUser) => {
     deleteStoredUser(targetUser.id)

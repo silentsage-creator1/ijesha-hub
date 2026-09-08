@@ -21,6 +21,7 @@ export function ParentDashboard() {
   const [student, setStudent] = useState<{
     name: string
     track: string
+    cohort: string
     progress: number
     attendance: number
   } | null>(null)
@@ -55,7 +56,7 @@ export function ParentDashboard() {
 
         if (targetStudentId) {
           const [stRes, progRes, attRes] = await Promise.all([
-            supabase.from('students').select('full_name, track').eq('id', targetStudentId).maybeSingle(),
+            supabase.from('students').select('full_name, track, cohort').eq('id', targetStudentId).maybeSingle(),
             supabase.from('student_progress').select('progress_percent').eq('student_id', targetStudentId).maybeSingle(),
             supabase.from('attendance').select('status').eq('student_id', targetStudentId),
           ])
@@ -68,7 +69,8 @@ export function ParentDashboard() {
           setStudent({
             name: stRes.data?.full_name || '—',
             track: stRes.data?.track || '—',
-            progress: Number(progRes.data?.progress_percent || 78),
+            cohort: stRes.data?.cohort || '—',
+            progress: Number(progRes.data?.progress_percent || 0),
             attendance,
           })
         }
