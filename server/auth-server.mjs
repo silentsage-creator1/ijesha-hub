@@ -2,7 +2,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import { createServer } from 'node:http'
 import { createClient } from '@supabase/supabase-js'
 
-const port = Number(process.env.APP_API_PORT ?? 3001)
+const port = Number(process.env.PORT ?? process.env.APP_API_PORT ?? 3001)
 const databaseUrl = process.env.SUPABASE_URL
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 const adminEmail = (process.env.APP_ADMIN_EMAIL ?? '').trim().toLowerCase()
@@ -114,8 +114,8 @@ async function currentUser(request) {
 }
 
 function setSessionCookie(response, token) {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
-  return `${cookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${sessionLifetimeMs / 1000}${secure}`
+  const crossSite = process.env.NODE_ENV === 'production' ? '; SameSite=None; Secure' : '; SameSite=Strict'
+  return `${cookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly${crossSite}; Max-Age=${sessionLifetimeMs / 1000}`
 }
 
 async function studentLearningContext(account) {
@@ -204,7 +204,8 @@ createServer(async (request, response) => {
     if (request.method === 'POST' && request.url === '/api/auth/signout') {
       const token = parseCookies(request)[cookieName]
       if (token) await db.from('app_auth_sessions').delete().eq('token_hash', sessionDigest(token))
-      return json(response, 204, {}, { ...cors, 'set-cookie': `${cookieName}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0` })
+      const crossSite = process.env.NODE_ENV === 'production' ? '; SameSite=None; Secure' : '; SameSite=Strict'
+      return json(response, 204, {}, { ...cors, 'set-cookie': `${cookieName}=; Path=/; HttpOnly${crossSite}; Max-Age=0` })
     }
 
     if (request.method === 'POST' && request.url === '/api/auth/forgot-password') {

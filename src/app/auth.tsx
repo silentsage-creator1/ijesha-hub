@@ -17,6 +17,8 @@ interface AuthContextValue {
   signOut: () => Promise<void>; refreshProfile: () => Promise<void>
 }
 const AuthContext = createContext<AuthContextValue | null>(null)
+const apiBaseUrl = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
+export const apiUrl = (path: string) => `${apiBaseUrl}${path}`
 
 export function isPlatformAdminEmail(email?: string | null) {
   return email?.trim().toLowerCase() === 'info@ijeshadigitalhub.com'
@@ -29,7 +31,7 @@ function toState(account: AppUser): { session: AppSession; profile: Profile } {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
-    response = await fetch(path, { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...init?.headers } })
+    response = await fetch(apiUrl(path), { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...init?.headers } })
   } catch {
     throw new Error('The application sign-in service is unavailable. Start `npm run server`, then refresh this page.')
   }
@@ -74,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async updatePassword(password) { try { await request('/api/auth/password', { method: 'PATCH', body: JSON.stringify({ password }) }); return { error: null } } catch (err) { return { error: err instanceof Error ? err.message : 'Unable to update your password.' } } },
     async updateEmail(email) { try { const { user: account } = await request<{ user: AppUser }>('/api/auth/email', { method: 'PATCH', body: JSON.stringify({ email }) }); const next = toState(account); setSession(next.session); setProfile(next.profile); return { error: null } } catch (err) { return { error: err instanceof Error ? err.message : 'Unable to update your email.' } } },
     async updateProfile(fullName) { try { const { user: account } = await request<{ user: AppUser }>('/api/auth/profile', { method: 'PATCH', body: JSON.stringify({ fullName }) }); const next = toState(account); setSession(next.session); setProfile(next.profile); return { error: null } } catch (err) { return { error: err instanceof Error ? err.message : 'Unable to update your profile.' } } },
-    async signOut() { await fetch('/api/auth/signout', { method: 'POST', credentials: 'include' }); setSession(null); setProfile(null); setError(null) }, refreshProfile,
+    async signOut() { await fetch(apiUrl('/api/auth/signout'), { method: 'POST', credentials: 'include' }); setSession(null); setProfile(null); setError(null) }, refreshProfile,
   }), [error, loading, profile, refreshProfile, session])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
