@@ -125,6 +125,14 @@ before deploying the corresponding frontend/backend update:
 4. `supabase/student-cohort-assignment.sql`
 5. `supabase/create-app-student.sql`
 6. `supabase/profile-certificates-migration.sql`
+7. `supabase/past-student-enrollment.sql` (administrator historical enrollment)
+
+For past students, administrators can select **Past student — completed training**
+in Add Student or All System Users → Assign Cohort. A completed cohort must have
+an end date before today. The original enrollment date must be within its training
+dates. Historical enrollment preserves another current enrollment; otherwise the
+student is marked Graduated. No attendance, grades or certificates are invented.
+Validate this path with `node --env-file-if-exists=.env.server server/live-workflow-test.mjs --run --historical-only`.
 
 Do not rerun the entire legacy schema merely to install these updates. Existing
 browser-only certificate records are not trusted or automatically imported as

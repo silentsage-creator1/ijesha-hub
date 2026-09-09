@@ -19,6 +19,9 @@ export function ProfilePage() {
   const [error,setError] = useState('')
   const [notice,setNotice] = useState('')
   const [saving,setSaving] = useState(false)
+  const displayName = data?.user.role==='student' && details.first_name && details.last_name
+    ? [details.first_name,details.middle_name,details.last_name].filter(Boolean).join(' ')
+    : name
   useEffect(()=>{
     let active=true
     setData(null)
@@ -30,8 +33,11 @@ export function ProfilePage() {
   async function save(event:FormEvent) {
     event.preventDefault();setSaving(true);setError('');setNotice('')
     try {
-      await cohortRequest('/api/profile',{method:'PATCH',body:JSON.stringify({fullName:name,details,photo})})
+      await cohortRequest('/api/profile',{method:'PATCH',body:JSON.stringify({fullName:displayName,details,photo})})
       await refreshProfile()
+      const saved = await cohortRequest<Data>('/api/profile')
+      setData(saved);setName(saved.user.full_name);setDetails(saved.details);setPhoto(undefined)
+      window.dispatchEvent(new Event('profile-updated'))
       setNotice('Profile saved successfully.')
     } catch(err){setError(err instanceof Error?err.message:'Unable to save profile.')}
     finally{setSaving(false)}
@@ -43,15 +49,15 @@ export function ProfilePage() {
     <form onSubmit={save} className="max-w-4xl space-y-5">
       <Card className="space-y-4 p-5">
         {(photo||data.photo)&&<img src={photo||data.photo||''} alt="Profile" className="h-24 w-24 rounded-full object-cover"/>}
-        <label className="block text-sm">Profile photo (optional, PNG/JPEG/WebP under 1 MB)<input className="input mt-1" type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>{
+        <label className="block text-sm">Profile photo ({data.user.role==='student'?'needed to complete your profile':'optional'}, PNG/JPEG/WebP under 1 MB)<input className="input mt-1" type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>{
           const file=event.target.files?.[0];if(!file)return
           if(file.size>1000000||!['image/png','image/jpeg','image/webp'].includes(file.type)){setError('Choose a PNG, JPEG or WebP under 1 MB.');return}
           const reader=new FileReader();reader.onload=()=>setPhoto(String(reader.result));reader.onerror=()=>setError('Unable to read photo.');reader.readAsDataURL(file)
         }}/></label>
-        <label className="block text-sm">Full name<input required maxLength={200} className="input mt-1" value={name} onChange={event=>setName(event.target.value)}/></label>
+        <label className="block text-sm">Full name{data.user.role==='student'?' (from your personal details)':''}<input required readOnly={data.user.role==='student'} maxLength={200} className="input mt-1" value={displayName} onChange={event=>setName(event.target.value)}/></label>
         <p>Email: {data.user.email}</p><p>Role: {data.user.role}</p><p>Organization: {data.user.organization||'Not assigned'}</p>
       </Card>
-      <Card className="space-y-4 p-5"><h2>Personal details</h2>{fields(data.user.role==='student'?personal:['phone_number','department'])}</Card>
+      <Card className="space-y-4 p-5"><h2>Personal details</h2>{data.user.role==='student'&&<p className="text-sm">Complete all personal details except middle name, and add a photo, to clear the dashboard warning. You can save your progress at any time.</p>}{fields(data.user.role==='student'?personal:['phone_number','department'])}</Card>
       {data.user.role==='student'&&<>
         <Card className="space-y-3 p-5"><h2>Enrollment</h2><p>Course: {data.cohort?.course_name||'Not assigned'}</p><p>Cohort: {data.cohort?.name||'Not assigned'}</p></Card>
         <Card className="space-y-4 p-5"><h2>Parent or guardian</h2>{fields(guardian)}</Card>

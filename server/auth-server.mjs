@@ -160,7 +160,8 @@ async function studentLearningContext(account) {
     : await db.from('students').select('*').ilike('email', account.email).maybeSingle()
   const student = byProfile ?? byEmail
   if (!student) return { student: null, cohort: null, sessions: [], attendance: [], classmates: [] }
-  let enrollmentQuery = db.from('enrollments').select('cohort_id').eq('student_id', student.id).eq('completion_status','in_progress')
+  let enrollmentQuery = db.from('enrollments').select('cohort_id,created_at,completion_status').eq('student_id', student.id)
+  if(!account.active_cohort_id) enrollmentQuery = enrollmentQuery.eq('completion_status','in_progress')
   if(account.active_cohort_id) enrollmentQuery = enrollmentQuery.eq('cohort_id',account.active_cohort_id)
   const { data: enrollment, error: enrollmentError } = await enrollmentQuery.order('created_at', { ascending: false }).limit(1).maybeSingle()
   if(enrollmentError) throw enrollmentError
@@ -179,6 +180,7 @@ async function studentLearningContext(account) {
   for (const result of [sessionsRes, attendanceRes, classmatesRes]) if (result.error) throw result.error
   return {
     student,
+    enrollment,
     cohort: { ...cohort, course_name: cohort.app_courses?.title ?? cohort.courses?.name ?? '' },
     sessions: sessionsRes.data ?? [],
     attendance: attendanceRes.data ?? [],
@@ -345,9 +347,11 @@ createServer(async (request, response) => {
         if(actor.role === 'trainer') return json(response,403,{error:'Administrator or manager access is required.'},cors)
         const input = await body(request)
         if(!['firstName','lastName','email','phone','dateOfBirth','gender','courseId','cohortId','enrollmentDate'].every(key=>String(input[key]??'').trim())) throw new Error('Complete all required student fields.')
+        if(input.pastStudent && actor.role !== 'admin') return json(response,403,{error:'Only administrators can record past students.'},cors)
+        if(input.pastStudent !== undefined && typeof input.pastStudent !== 'boolean') throw new Error('Invalid enrollment type.')
         if(!/^\S+@\S+\.\S+$/.test(input.email) || String(input.password??'').length<8) throw new Error('Enter a valid email and password of at least eight characters.')
         const {password,confirmPassword,...details}=input
-        const result = await db.rpc('create_app_student',{input:details,password_digest:passwordHash(password)})
+        const result = await db.rpc(input.pastStudent ? 'create_past_app_student' : 'create_app_student',{input:details,password_digest:passwordHash(password)})
         if(result.error) throw result.error
         return json(response,201,{studentId:result.data},cors)
       }
@@ -372,9 +376,29 @@ createServer(async (request, response) => {
       if(!actor || !['admin','manager'].includes(actor.role)) return json(response,403,{error:'Administrator or manager access is required.'},cors)
       const input = await body(request)
       if(!input.cohortId) throw new Error('Choose a cohort.')
-      const result = await db.rpc('assign_app_student_cohort',{account_id:assignCohortMatch[1],target_cohort_id:input.cohortId})
+      if(input.pastStudent && actor.role !== 'admin') return json(response,403,{error:'Only administrators can record past students.'},cors)
+      if(input.pastStudent !== undefined && typeof input.pastStudent !== 'boolean') throw new Error('Invalid enrollment type.')
+      const result = input.pastStudent
+        ? await db.rpc('record_past_student_cohort',{account_id:assignCohortMatch[1],target_cohort_id:input.cohortId,enrolled_on:input.enrollmentDate || null})
+        : await db.rpc('assign_app_student_cohort',{account_id:assignCohortMatch[1],target_cohort_id:input.cohortId})
       if(result.error) throw result.error
       return json(response,200,{message:'Student assigned to cohort successfully.'},cors)
+    }
+    const cohortStudentsMatch = request.url?.match(/^\/api\/cohorts\/([0-9a-f-]{36})\/students$/i)
+    if (cohortStudentsMatch && request.method === 'GET') {
+      const actor=await currentUser(request)
+      if(!actor || !await canTeachCohort(actor,cohortStudentsMatch[1])) return json(response,403,{error:'This cohort is not assigned to you.'},cors)
+      const cid=cohortStudentsMatch[1]
+      const [enrollments,attendance,items]=await Promise.all([
+        db.from('enrollments').select('id,student_id,completion_status,students(id,full_name,status,track)').eq('cohort_id',cid),
+        db.from('attendance').select('student_id,status').eq('cohort_id',cid),
+        db.from('app_learning_items').select('id').eq('cohort_id',cid).eq('status','published'),
+      ])
+      for(const result of [enrollments,attendance,items]) if(result.error) throw result.error
+      const submissions=items.data.length?await db.from('app_learning_submissions').select('student_id').in('item_id',items.data.map(i=>i.id)).not('submitted_at','is',null):{data:[],error:null}
+      if(submissions.error) throw submissions.error
+      const progress=enrollments.data.map(e=>({student_id:e.student_id,progress_percent:items.data.length?Math.round(100*submissions.data.filter(s=>s.student_id===e.student_id).length/items.data.length):0}))
+      return json(response,200,{enrollments:enrollments.data,attendance:attendance.data,progress},cors)
     }
     const attendanceMatch = request.url?.match(/^\/api\/attendance\/(cohorts|sessions)\/([0-9a-f-]{36})$/i)
     if(attendanceMatch && ['GET','PATCH'].includes(request.method)) {
@@ -673,6 +697,7 @@ createServer(async (request, response) => {
       if (!account || account.role !== 'student') return json(response, 403, { error: 'Student access is required.' }, cors)
       const context = await studentLearningContext(account)
       if (!context.student) return json(response, 400, { error: 'No student record is linked to this account.' }, cors)
+      if (context.enrollment?.completion_status === 'completed') return json(response,403,{error:'This enrollment is completed. Historical learning records are read-only.'},cors)
       const work=await db.from('app_learning_items').select('*').eq('id',learningSubmissionMatch[1]).single()
       if(work.error) throw work.error
       if(work.data.cohort_id !== context.cohort?.id || work.data.status !== 'published') return json(response,403,{error:'This work is not assigned to you.'},cors)

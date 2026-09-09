@@ -1,4 +1,5 @@
 const personalFields = ['first_name','middle_name','last_name','date_of_birth','gender','phone_number','home_address','state','lga','city_town','guardian_first_name','guardian_last_name','guardian_relationship','guardian_phone','guardian_alt_phone','guardian_email','guardian_address','certificate_name']
+import { studentProfileComplete } from './profile-completion.mjs'
 function checked(result) { if (result.error) throw result.error; return result.data }
 
 export async function profileCertificates({ request, response, account, db, body, json, cors, studentLearningContext, publicUser }) {
@@ -16,7 +17,7 @@ export async function profileCertificates({ request, response, account, db, body
       }
       let photo = extra.photo ?? null
       if (!photo && details.photo_path) photo = checked(await db.storage.from('student-photos').createSignedUrl(details.photo_path,3600)).signedUrl
-      json(response,200,{user:publicUser(account),details:{...extra,...details},photo,cohort:context?.cohort ?? null},cors)
+      json(response,200,{user:publicUser(account),details:{...extra,...details},photo,cohort:context?.cohort ?? null,enrollment:context?.enrollment ?? null,profileComplete:studentProfileComplete(details,photo)},cors)
     } else if (request.method === 'PATCH') {
       const input = await body(request)
       const fullName = String(input.fullName ?? '').trim()
@@ -32,7 +33,7 @@ export async function profileCertificates({ request, response, account, db, body
         if (!context?.student) throw new Error('An administrator must link your student record first.')
         const details = {}
         for (const key of personalFields) if (key in (input.details ?? {})) details[key] = String(input.details[key] ?? '').trim().slice(0,1000) || null
-        checked(await db.from('student_profile_details').upsert({student_id:context.student.id,...details}))
+        checked(await db.from('student_profile_details').upsert({student_id:context.student.id,...details},{onConflict:'student_id'}))
         checked(await db.from('students').update({full_name:fullName}).eq('id',context.student.id))
       }
       checked(await db.from('app_profile_details').upsert({user_id:account.id,details:extra}))

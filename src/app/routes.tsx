@@ -38,7 +38,7 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route element={<AppShell />}>
-        <Route path="/" element={role === 'student' ? <StudentLearningSummary/> : <DashboardPage />} />
+        <Route path="/" element={<DashboardPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/students" element={<StudentsPage />} />
         <Route path="/students/:id" element={<StudentDetailPage />} />

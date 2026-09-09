@@ -3,9 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, BookOpen, CalendarDays, ClipboardCheck, Loader2, Trash2, Users } from 'lucide-react'
 import { Badge, Card, ProgressRing, SectionHeading } from '@/components/ui/primitives'
 import { Modal } from '@/components/ui/Modal'
-import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/app/auth'
-import { deleteCohort, getAllCohorts, type Cohort } from '@/lib/cohorts'
+import { cohortRequest, deleteCohort, getAllCohorts, type Cohort } from '@/lib/cohorts'
 
 type Student = { id: string; full_name: string; status: string; track: string | null }
 type Enrollment = { id: string; student_id: string; completion_status: string; students: Student | null }
@@ -36,7 +35,6 @@ export function CohortDetailPage() {
   const [tab, setTab] = useState<Tab>('overview')
   const [cohort, setCohort] = useState<Cohort | null>(null)
   const [enrollments, setEnrollments] = useState<Enrollment[]>([])
-  const [directStudents, setDirectStudents] = useState<Student[]>([])
   const [progress, setProgress] = useState<Progress[]>([])
   const [attendance, setAttendance] = useState<Attendance[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -49,59 +47,16 @@ export function CohortDetailPage() {
     let cancel = false
     async function load() {
       try {
-        const [cRes, allCohorts, eRes, aRes] = await Promise.all([
-          supabase.from('cohorts').select('id,name,course_id,starts_on,ends_on,courses(name)').eq('id', id).maybeSingle(),
+        setError(null)
+        const [allCohorts, workspace] = await Promise.all([
           getAllCohorts(),
-          supabase.from('enrollments').select('id,student_id,completion_status,students(id,full_name,status,track)').eq('cohort_id', id),
-          supabase.from('attendance').select('student_id,status').eq('cohort_id', id),
+          cohortRequest<{enrollments:Enrollment[];attendance:Attendance[];progress:Progress[]}>('/api/cohorts/'+id+'/students'),
         ])
-
-        if (cancel) return
-
-        let foundCohort: Cohort | null = null
-        if (cRes.data) {
-          foundCohort = {
-            id: cRes.data.id,
-            name: cRes.data.name,
-            course_id: cRes.data.course_id,
-            course_name: (cRes.data as any).courses?.name || 'Course',
-            starts_on: cRes.data.starts_on,
-            ends_on: cRes.data.ends_on,
-            status: cRes.data.ends_on && new Date(cRes.data.ends_on) < new Date() ? 'Completed' : 'Active',
-          }
-        } else {
-          const fallback = allCohorts.find((c) => c.id === id || c.name.toLowerCase() === id.toLowerCase())
-          if (fallback) foundCohort = fallback
-        }
-
-        setCohort(foundCohort)
-
-        const cohortEnrollments = (eRes.data ?? []) as unknown as Enrollment[]
-        setEnrollments(cohortEnrollments)
-        setAttendance((aRes.data ?? []) as Attendance[])
-
-        // Also discover students assigned by cohort name
-        if (foundCohort?.name) {
-          const { data: stByCohort } = await supabase
-            .from('students')
-            .select('id,full_name,status,track')
-            .ilike('cohort', `%${foundCohort.name}%`)
-
-          if (stByCohort) {
-            setDirectStudents(stByCohort as Student[])
-          }
-        }
-
-        const enrollmentIds = cohortEnrollments.map((item) => item.id)
-        if (enrollmentIds.length) {
-          const p = await supabase
-            .from('student_progress')
-            .select('student_id,progress_percent,enrollment_id,updated_at')
-            .in('enrollment_id', enrollmentIds)
-            .order('updated_at', { ascending: true })
-
-          if (!cancel && p.data) setProgress(p.data as Progress[])
-        }
+        if(cancel)return
+        setCohort(allCohorts.find(c=>c.id===id)??null)
+        setEnrollments(workspace.enrollments)
+        setAttendance(workspace.attendance)
+        setProgress(workspace.progress)
       } catch (err: any) {
         if (!cancel) setError(err?.message || 'Failed to load cohort details')
       }
@@ -113,17 +68,15 @@ export function CohortDetailPage() {
     }
   }, [id])
 
-  // Combine enrolled students and direct cohort students uniquely
+  // Classify historical students by this enrollment, not their current course status.
   const allStudents = useMemo(() => {
     const map = new Map<string, Student>()
     for (const e of enrollments) {
-      if (e.students) map.set(e.students.id, e.students)
+      if (e.students) map.set(e.students.id, {...e.students,status:e.completion_status==='completed'?'graduated':e.students.status})
     }
-    for (const s of directStudents) {
-      if (!map.has(s.id)) map.set(s.id, s)
-    }
+
     return Array.from(map.values())
-  }, [enrollments, directStudents])
+  }, [enrollments])
 
   const current = allStudents.filter((s) => !isPast(s.status))
   const past = allStudents.filter((s) => isPast(s.status))
