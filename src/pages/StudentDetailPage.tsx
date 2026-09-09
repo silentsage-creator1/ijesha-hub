@@ -6,6 +6,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Field } from '@/components/ui/Field'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/app/auth'
+import { sameNonEmptyText } from '@/lib/text'
 import { formatShortDate } from '@/lib/attendance'
 import { getStoredAssignments, getStoredSubmissions, formatAssignmentDate } from '@/lib/assignments'
 import { getStoredAssessments, getStoredAttempts, formatAssessmentDate } from '@/lib/assessments'
@@ -542,7 +543,7 @@ function StudentAssignmentsSection({ student }: { student: Student }) {
   const studentAssignments = useMemo(() => {
     return assignments.map(asg => {
       const subs = getStoredSubmissions(asg.id)
-      const sub = subs.find(s => s.student_name.toLowerCase() === student.full_name.toLowerCase() || s.student_id === student.id)
+      const sub = subs.find(s => s.student_id === student.id || (!s.student_id && sameNonEmptyText(s.student_name,student.full_name)))
       return {
         assignment: asg,
         submission: sub,
@@ -654,8 +655,7 @@ function StudentAssessmentsSection({ student }: { student: Student }) {
       const myAttempt = atts.find(
         (a) =>
           a.student_id === student.id ||
-          a.student_name.toLowerCase() === student.full_name.toLowerCase() ||
-          (student.email && a.student_email?.toLowerCase() === student.email.toLowerCase())
+          (!a.student_id && (sameNonEmptyText(a.student_name,student.full_name) || sameNonEmptyText(a.student_email,student.email)))
       )
 
       return {
@@ -787,8 +787,8 @@ function StudentProgressSection({ student }: { student: Student }) {
   const progressRecord: StudentProgressRecord | null = useMemo(() => {
     const found = cohortData.students.find(
       (s) =>
-        s.studentName.toLowerCase() === student.full_name.toLowerCase() ||
-        (student.email && s.studentEmail && s.studentEmail.toLowerCase() === student.email.toLowerCase())
+        sameNonEmptyText(s.studentName,student.full_name) ||
+        sameNonEmptyText(s.studentEmail,student.email)
     )
     return found || null
   }, [cohortData.students, student])
@@ -1144,5 +1144,4 @@ function StudentAcademicResultsSection({ student }: { student: Student }) {
     </Card>
   )
 }
-
 

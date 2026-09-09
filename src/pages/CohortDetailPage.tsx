@@ -5,6 +5,8 @@ import { Badge, Card, ProgressRing, SectionHeading } from '@/components/ui/primi
 import { Modal } from '@/components/ui/Modal'
 import { useAuth } from '@/app/auth'
 import { cohortRequest, deleteCohort, getAllCohorts, type Cohort } from '@/lib/cohorts'
+import { safeText, searchText } from '@/lib/text'
+import { cohortStudentStatus, isPastStudentStatus as isPast, studentStatusLabel as labelStatus } from '@/lib/cohortStudentStatus'
 
 type Student = { id: string; full_name: string; status: string; track: string | null }
 type Enrollment = { id: string; student_id: string; completion_status: string; students: Student | null }
@@ -24,8 +26,6 @@ const tabs: { id: Tab; label: string }[] = [
   { id: 'reports', label: 'Reports' },
 ]
 
-const isPast = (status: string) => ['graduated', 'withdrawn', 'paused', 'completed', 'alumni', 'inactive'].includes(status.toLowerCase())
-const labelStatus = (status: string) => (status === 'paused' ? 'Inactive' : status === 'graduated' ? 'Completed' : status)
 
 export function CohortDetailPage() {
   const { id = '' } = useParams()
@@ -72,7 +72,7 @@ export function CohortDetailPage() {
   const allStudents = useMemo(() => {
     const map = new Map<string, Student>()
     for (const e of enrollments) {
-      if (e.students) map.set(e.students.id, {...e.students,status:e.completion_status==='completed'?'graduated':e.students.status})
+      if (e.students) map.set(e.students.id, {...e.students,full_name:safeText(e.students.full_name)||'Unnamed student',status:cohortStudentStatus(e.students.status,e.completion_status)})
     }
 
     return Array.from(map.values())
@@ -90,8 +90,8 @@ export function CohortDetailPage() {
   const shown = useMemo(() => {
     const source = tab === 'past' ? past : current
     return source.filter((s) => {
-      const text = !query || s.full_name.toLowerCase().includes(query.toLowerCase())
-      const normalized = labelStatus(s.status).toLowerCase()
+      const text = !query || searchText(s.full_name).includes(searchText(query))
+      const normalized = searchText(labelStatus(s.status))
       return text && (filter === 'all' || normalized === filter)
     })
   }, [tab, past, current, query, filter])
@@ -273,7 +273,7 @@ export function CohortDetailPage() {
                           {course} · Attendance {attendancePct(s.id)}% · Progress {pct(s.id)}%
                         </p>
                       </Link>
-                      <Badge tone={isPast(s.status) ? 'neutral' : 'success'}>{labelStatus(s.status)}</Badge>
+                      <Badge tone={isPast(s.status) || s.status==='unknown' ? 'neutral' : 'success'}>{labelStatus(s.status)}</Badge>
                     </li>
                   ))
                 ) : (
