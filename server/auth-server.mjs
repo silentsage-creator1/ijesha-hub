@@ -372,6 +372,52 @@ createServer(async (request, response) => {
       if(result.error) throw result.error
       return json(response,200,{students:result.data},cors)
     }
+    const studentDetailMatch = request.url?.match(/^\/api\/students\/([0-9a-f-]{36})$/i)
+    if (studentDetailMatch && request.method === 'GET') {
+      const actor = await currentUser(request)
+      if (!actor || !['admin', 'manager', 'trainer'].includes(actor.role)) return json(response, 403, { error: 'Staff access is required.' }, cors)
+      const id = studentDetailMatch[1]
+      let result = await db.from('students').select('*').eq('id', id).maybeSingle()
+      if (result.error) throw result.error
+      if (!result.data) {
+        const account = await db.from('app_auth_users').select('student_id').eq('id', id).maybeSingle()
+        if (account.error) throw account.error
+        result = account.data?.student_id
+          ? await db.from('students').select('*').eq('id', account.data.student_id).maybeSingle()
+          : await db.from('students').select('*').eq('profile_id', id).maybeSingle()
+        if (result.error) throw result.error
+      }
+      if (!result.data) return json(response, 404, { error: 'No linked student record was found. An administrator must create or link this account to a student record.' }, cors)
+      const student = result.data
+      if (actor.role === 'trainer') {
+        const enrollments = await db.from('enrollments').select('cohort_id').eq('student_id', student.id)
+        if (enrollments.error) throw enrollments.error
+        let allowed = false
+        for (const enrollment of enrollments.data) {
+          if (await canTeachCohort(actor, enrollment.cohort_id)) { allowed = true; break }
+        }
+        if (!allowed) return json(response, 403, { error: 'This student is not assigned to your course.' }, cors)
+      }
+      let details = null
+      let photo = null
+      if (actor.role !== 'trainer') {
+        const personal = await db.from('student_profile_details').select('*').eq('student_id', student.id).maybeSingle()
+        if (personal.error) throw personal.error
+        details = personal.data
+        const account = await db.from('app_auth_users').select('id').eq('student_id', student.id).maybeSingle()
+        if (account.error) throw account.error
+        if (account.data) {
+          const extra = await db.from('app_profile_details').select('details').eq('user_id', account.data.id).maybeSingle()
+          if (extra.error) throw extra.error
+          photo = extra.data?.details?.photo ?? null
+        }
+        if (!photo && details?.photo_path) {
+          const signed = await db.storage.from('student-photos').createSignedUrl(details.photo_path, 3600)
+          if (!signed.error) photo = signed.data.signedUrl
+        }
+      }
+      return json(response, 200, { student, details, photo }, cors)
+    }
     const assignCohortMatch = request.url?.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})\/cohort$/i)
     if(assignCohortMatch && request.method === 'PATCH') {
       const actor = await currentUser(request)
@@ -623,9 +669,9 @@ createServer(async (request, response) => {
         ? { content: Array.isArray(input.modules) ? input.modules : existing.content, updated_at: new Date().toISOString() }
         : {
             title: String(input.title ?? existing.title).trim(), description: String(input.description ?? existing.description),
-            thumbnail: input.thumbnail || null, level: input.level || null, category: String(input.category ?? existing.category ?? '').trim() || null, status: input.status === 'Published' ? 'Published' : 'Draft',
-            content: Array.isArray(input.modules) ? input.modules : existing.content, cohort_id: input.cohortId || null,
-            trainer_id: input.trainerId || null, start_date: input.startDate || null, end_date: input.endDate || null, updated_at: new Date().toISOString(),
+            thumbnail: input.thumbnail === undefined ? existing.thumbnail : input.thumbnail || null, level: input.level === undefined ? existing.level : input.level || null, category: String(input.category ?? existing.category ?? '').trim() || null, status: input.status === undefined ? existing.status : input.status === 'Published' ? 'Published' : 'Draft',
+            content: Array.isArray(input.modules) ? input.modules : existing.content, cohort_id: input.cohortId === undefined ? existing.cohort_id : input.cohortId || null,
+            trainer_id: input.trainerId === undefined ? existing.trainer_id : input.trainerId || null, start_date: input.startDate === undefined ? existing.start_date : input.startDate || null, end_date: input.endDate === undefined ? existing.end_date : input.endDate || null, updated_at: new Date().toISOString(),
           }
       if (!patch.title && account.role !== 'trainer') throw new Error('Enter a course title.')
       const { data, error } = await db.from('app_courses').update(patch).eq('id', existing.id).select('*').single()

@@ -5,6 +5,7 @@ import { Card, Badge, Avatar, SectionHeading } from '@/components/ui/primitives'
 import { Modal } from '@/components/ui/Modal'
 import { Field } from '@/components/ui/Field'
 import { supabase } from '@/lib/supabase'
+import { cohortRequest } from '@/lib/cohorts'
 import { useAuth } from '@/app/auth'
 import { sameNonEmptyText } from '@/lib/text'
 import { formatShortDate } from '@/lib/attendance'
@@ -61,57 +62,24 @@ export function StudentDetailPage() {
     let cancelled = false
     setLoading(true)
     setLoadError(null)
-    supabase
-      .from('students')
-      .select('*')
-      .or(`id.eq.${id},profile_id.eq.${id}`)
-      .maybeSingle()
-      .then(async ({ data, error }) => {
+    cohortRequest<{ student: Student; details: Record<string, string | number | null> | null; photo: string | null }>(`/api/students/${encodeURIComponent(id)}`)
+      .then((result) => {
         if (cancelled) return
-        if (data) {
-          const st = data as Student
-          setStudent(st)
-          if (role === 'admin' || role === 'manager') {
-            const detailsResult = await supabase.from('student_profile_details').select('*').eq('student_id', st.id).maybeSingle()
-            if (detailsResult.data) {
-              const profileDetails = detailsResult.data as Record<string, string | number | null>
-              setDetails(profileDetails)
-              if (typeof profileDetails.photo_path === 'string') {
-                const signed = await supabase.storage.from('student-photos').createSignedUrl(profileDetails.photo_path, 60 * 60)
-                if (!signed.error && !cancelled) setPhotoUrl(signed.data.signedUrl)
-              }
-            }
-          }
-        } else {
-          // Fallback to profile row if student record has not been inserted yet
-          const { data: prof, error: profError } = await supabase.from('profiles').select('*').eq('id', id).maybeSingle()
-          if (prof) {
-            setStudent({
-              id: prof.id,
-              profile_id: prof.id,
-              full_name: prof.full_name,
-              email: (prof as any).email ?? (prof.full_name?.toLowerCase().includes('amina') ? 'amina.yusuf@student.ijeshahub.org' : null),
-              cohort: null,
-              track: 'Frontend Development',
-              status: 'active',
-              assigned_trainer_id: null,
-              organization: prof.organization ?? null,
-              created_by: null,
-              created_at: prof.created_at,
-              updated_at: prof.created_at,
-            })
-          } else if (error || profError) {
-            setLoadError(error?.message ?? profError?.message ?? 'Student could not be found.')
-          } else {
-            setLoadError('Student could not be found.')
-          }
-        }
-        setLoading(false)
+        setStudent(result.student)
+        setDetails(result.details)
+        setPhotoUrl(result.photo)
       })
+      .catch((error) => {
+        if (!cancelled) {
+          setStudent(null)
+          setLoadError(error instanceof Error ? error.message : 'Unable to load student.')
+        }
+      })
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, role])
 
   function openEdit() {
     if (!student) return
@@ -1144,4 +1112,3 @@ function StudentAcademicResultsSection({ student }: { student: Student }) {
     </Card>
   )
 }
-
