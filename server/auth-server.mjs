@@ -131,9 +131,11 @@ async function body(request) {
 async function currentUser(request) {
   const token = parseCookies(request)[cookieName]
   if (!token) return null
-  const { data: session } = await db.from('app_auth_sessions').select('user_id, expires_at').eq('token_hash', sessionDigest(token)).maybeSingle()
+  const { data: session, error: sessionError } = await db.from('app_auth_sessions').select('user_id, expires_at').eq('token_hash', sessionDigest(token)).maybeSingle()
+  if (sessionError) throw new Error('Unable to verify your session right now. Please try again.')
   if (!session || new Date(session.expires_at).getTime() <= Date.now()) return null
-  const { data: account } = await db.from('app_auth_users').select('*').eq('id', session.user_id).maybeSingle()
+  const { data: account, error: accountError } = await db.from('app_auth_users').select('*').eq('id', session.user_id).maybeSingle()
+  if (accountError) throw new Error('Unable to verify your account right now. Please try again.')
   return account?.approval_status === 'approved' ? account : null
 }
 
@@ -576,6 +578,9 @@ createServer(async (request, response) => {
       const account = await currentUser(request)
       if (!account || !['admin', 'manager'].includes(account.role)) return json(response, 403, { error: 'Administrator or manager access is required.' }, cors)
       const { error } = await db.from('cohorts').delete().eq('id', cohortDeleteMatch[1])
+      if (error?.code === '23503') {
+        return json(response, 409, { error: 'This cohort still has linked enrollment or learning records, so it cannot be deleted. No records were removed. Keep the cohort to preserve student history, or ask an administrator to review its linked records before permanent removal.' }, cors)
+      }
       if (error) throw error
       return json(response, 200, { success: true }, cors)
     }

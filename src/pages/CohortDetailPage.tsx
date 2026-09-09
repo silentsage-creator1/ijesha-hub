@@ -168,7 +168,7 @@ export function CohortDetailPage() {
                 Are you sure you want to remove &quot;{cohort.name}&quot;?
               </p>
               <p className="text-xs text-red-700 leading-relaxed">
-                This will unenroll all active students from this cohort and remove associated schedules, attendance logs, and sessions. This action cannot be undone.
+                This permanently removes the cohort and any related records configured for automatic deletion. Protected linked records may block removal. This action cannot be undone.
               </p>
               {allStudents.length > 0 && (
                 <p className="text-xs font-medium text-red-800">

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { CurrentUser, Profile, Role } from '@/types'
 
 type AppUser = { id: string; email: string; full_name: string; role: Role; organization: string; track?: string | null; approval_status: 'pending' | 'approved' | 'rejected'; created_at: string }
@@ -28,15 +28,19 @@ function initialsFor(name: string) { return name.trim().split(/\s+/).slice(0, 2)
 function toState(account: AppUser): { session: AppSession; profile: Profile } {
   return { session: { user: { id: account.id, email: account.email, created_at: account.created_at, user_metadata: { full_name: account.full_name, role: account.role, track: account.track ?? 'Frontend Development', approval_status: account.approval_status, organization: account.organization } } }, profile: { id: account.id, full_name: account.full_name, role: account.role, organization: account.organization, created_at: account.created_at, approval_status: account.approval_status } }
 }
+class AuthRequestError extends Error {
+  status: number
+  constructor(message: string, status: number) { super(message); this.status = status }
+}
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
     response = await fetch(apiUrl(path), { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...init?.headers } })
   } catch {
-    throw new Error('The application sign-in service is unavailable. Start `npm run server`, then refresh this page.')
+    throw new Error('The application sign-in service is temporarily unavailable. Please try again shortly.')
   }
   const payload = await response.json().catch(() => ({})) as T & { error?: string }
-  if (!response.ok) throw new Error(payload.error || `The application sign-in service returned an error (${response.status}). Check its terminal output.`)
+  if (!response.ok) throw new AuthRequestError(payload.error || `The application sign-in service returned an error (${response.status}). Please try again shortly.`, response.status)
   return payload
 }
 
@@ -45,10 +49,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const authRevision = useRef(0)
   const refreshProfile = useCallback(async () => {
-    try { const { user: account } = await request<{ user: AppUser }>('/api/auth/me'); const next = toState(account); setSession(next.session); setProfile(next.profile); setError(null) }
-    catch (err) { setSession(null); setProfile(null); if (!(err instanceof Error && err.message === 'Not signed in.')) setError(err instanceof Error ? err.message : 'Unable to restore your session.') }
-    finally { setLoading(false) }
+    const revision = ++authRevision.current
+    try {
+      const { user: account } = await request<{ user: AppUser }>('/api/auth/me')
+      if (revision !== authRevision.current) return
+      const next = toState(account); setSession(next.session); setProfile(next.profile); setError(null)
+    } catch (err) {
+      if (revision !== authRevision.current) return
+      if (err instanceof AuthRequestError && err.status === 401) {
+        setSession(null); setProfile(null); setError(null)
+      } else {
+        setError(err instanceof Error ? err.message : 'Unable to refresh your session. Please try again shortly.')
+      }
+    } finally { if (revision === authRevision.current) setLoading(false) }
   }, [])
   useEffect(() => { void refreshProfile() }, [refreshProfile])
   useEffect(() => {
@@ -68,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshProfile])
   const value = useMemo<AuthContextValue>(() => ({
     session, profile, user: profile ? { name: profile.full_name, role: profile.role, initials: initialsFor(profile.full_name), org: profile.organization ?? undefined, photoPath: profile.photo_path ?? undefined } : null, role: profile?.role ?? null, loading, error,
-    async signIn(email, password) { try { const { user: account } = await request<{ user: AppUser }>('/api/auth/signin', { method: 'POST', body: JSON.stringify({ email, password }) }); const next = toState(account); setSession(next.session); setProfile(next.profile); setError(null); return { error: null } } catch (err) { const message = err instanceof Error ? err.message : 'Unable to sign in.'; setError(message); return { error: message } } },
+    async signIn(email, password) { try { const { user: account } = await request<{ user: AppUser }>('/api/auth/signin', { method: 'POST', body: JSON.stringify({ email, password }) }); ++authRevision.current; setLoading(false); const next = toState(account); setSession(next.session); setProfile(next.profile); setError(null); return { error: null } } catch (err) { const message = err instanceof Error ? err.message : 'Unable to sign in.'; setError(message); return { error: message } } },
     async quickSignIn() { return { error: 'Demo sign-in is no longer available. Please use an application account.' } },
     async signUp(email, password, fullName, track) { try { const result = await request<{ user: AppUser }>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, fullName, track }) }); setError(null); return { error: null, user: result.user } } catch (err) { const message = err instanceof Error ? err.message : 'Unable to create your account.'; setError(message); return { error: message } } },
     async resetPassword(email) { try { const result = await request<{ developmentResetUrl?: string }>('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }); return { error: null, developmentResetUrl: result.developmentResetUrl } } catch (err) { return { error: err instanceof Error ? err.message : 'Unable to request a reset link.' } } },
@@ -76,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async updatePassword(password) { try { await request('/api/auth/password', { method: 'PATCH', body: JSON.stringify({ password }) }); return { error: null } } catch (err) { return { error: err instanceof Error ? err.message : 'Unable to update your password.' } } },
     async updateEmail(email) { try { const { user: account } = await request<{ user: AppUser }>('/api/auth/email', { method: 'PATCH', body: JSON.stringify({ email }) }); const next = toState(account); setSession(next.session); setProfile(next.profile); return { error: null } } catch (err) { return { error: err instanceof Error ? err.message : 'Unable to update your email.' } } },
     async updateProfile(fullName) { try { const { user: account } = await request<{ user: AppUser }>('/api/auth/profile', { method: 'PATCH', body: JSON.stringify({ fullName }) }); const next = toState(account); setSession(next.session); setProfile(next.profile); return { error: null } } catch (err) { return { error: err instanceof Error ? err.message : 'Unable to update your profile.' } } },
-    async signOut() { await fetch(apiUrl('/api/auth/signout'), { method: 'POST', credentials: 'include' }); setSession(null); setProfile(null); setError(null) }, refreshProfile,
+    async signOut() { ++authRevision.current; await fetch(apiUrl('/api/auth/signout'), { method: 'POST', credentials: 'include' }); ++authRevision.current; setLoading(false); setSession(null); setProfile(null); setError(null) }, refreshProfile,
   }), [error, loading, profile, refreshProfile, session])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

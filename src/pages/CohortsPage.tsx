@@ -228,7 +228,7 @@ export function CohortsPage() {
                 Are you sure you want to remove &quot;{cohortToDelete.name}&quot;?
               </p>
               <p className="text-xs text-red-700 leading-relaxed">
-                This will unenroll any active students from this cohort and remove associated schedules and attendance records. This action cannot be undone.
+                This permanently removes the cohort and any related records configured for automatic deletion. Protected linked records may block removal. This action cannot be undone.
               </p>
               {(() => {
                 const count = enrollments.filter((e) => e.cohort_id === cohortToDelete.id).length
