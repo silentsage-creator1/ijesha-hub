@@ -66,14 +66,8 @@ export function CreateCertificateModal({
         setLoadingStudents(true)
         const list = await loadAvailableStudents()
         setStudents(list)
-        // By default pre-select Prince Abimbola Olashore if available for immediate visual feedback
-        const defaultStudent =
-          list.find((s) => s.full_name.toLowerCase().includes('olashore')) || list[0]
-        if (defaultStudent) {
-          setSelectedStudent(defaultStudent)
-        }
       } catch (err) {
-        console.warn('Failed to load students', err)
+        setError(err instanceof Error ? err.message : 'Unable to load students.')
       } finally {
         setLoadingStudents(false)
       }
@@ -94,10 +88,14 @@ export function CreateCertificateModal({
     )
   }, [students, searchQuery])
 
-  // Handle custom PDF or image upload
+  // Canvas templates must be images; the issued download is a PDF.
   const handleTemplateUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    if (file.size > 1_000_000 || !['image/png','image/jpeg','image/webp'].includes(file.type)) {
+      setError('Choose a PNG, JPEG or WebP template under 1 MB.')
+      return
+    }
 
     const reader = new FileReader()
     reader.onload = (event) => {
@@ -130,15 +128,16 @@ export function CreateCertificateModal({
     if (!selectedStudent) return
     try {
       setIssuing(true)
-      const newCert = saveCertificate({
+      const newCert = await saveCertificate({
         student_id: selectedStudent.id,
         student_name: selectedStudent.full_name,
-        course: selectedStudent.course || 'Artificial Intelligence Tools Mastery',
-        cohort: selectedStudent.cohort || 'Cohort 2024-A',
+        course: selectedStudent.course,
+        cohort: selectedStudent.cohort,
         certificate_type: 'Certificate of Achievement',
         issue_date: new Date().toISOString().slice(0, 10),
         status: 'Issued',
         template_url: templateUrl || undefined,
+        calibration,
       })
 
       // Save calibration settings
@@ -147,7 +146,7 @@ export function CreateCertificateModal({
       setShowConfirmDialog(false)
       onCertificateIssued(newCert)
     } catch (err) {
-      setError('Failed to issue certificate. Please try again.')
+      setError(err instanceof Error ? err.message : 'Failed to issue certificate. Please try again.')
       console.error(err)
     } finally {
       setIssuing(false)
@@ -333,7 +332,7 @@ export function CreateCertificateModal({
                   <span>Upload Template</span>
                   <input
                     type="file"
-                    accept="image/*,application/pdf"
+                    accept="image/png,image/jpeg,image/webp"
                     onChange={handleTemplateUpload}
                     className="hidden"
                   />

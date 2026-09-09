@@ -5,11 +5,10 @@ import { PageHeader } from '@/components/shell/PageHeader'
 import { Card } from '@/components/ui/primitives'
 import { Modal } from '@/components/ui/Modal'
 import { Field } from '@/components/ui/Field'
-import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/app/auth'
-import { officialCourses } from '@/lib/courses'
 import {
-  getAllCohorts,
+  getCohortWorkspace,
+  cohortRequest,
   saveCohort as persistCohort,
   deleteCohort as removePersistedCohort,
   type Cohort,
@@ -36,16 +35,16 @@ export function CohortsPage() {
 
   const load = async () => {
     try {
-      const [courseResult, cohortList, enrollmentResult] = await Promise.all([
-        supabase.from('courses').select('id, name').order('name'),
-        getAllCohorts(),
-        supabase.from('enrollments').select('cohort_id,completion_status'),
+      setError(null)
+      const [courseResult, workspace] = await Promise.all([
+        cohortRequest<{ courses: { id: string; title: string }[] }>('/api/courses'),
+        getCohortWorkspace(),
       ])
 
-      const loadedCourses = officialCourses((courseResult.data ?? []) as Course[])
+      const loadedCourses = courseResult.courses.map(c => ({ id: c.id, name: c.title }))
       setCourses(loadedCourses)
-      setCohorts(cohortList)
-      setEnrollments((enrollmentResult.data ?? []) as { cohort_id: string; completion_status: string }[])
+      setCohorts(workspace.cohorts)
+      setEnrollments(workspace.enrollments)
     } catch (err: any) {
       setError(err?.message || 'Error loading cohorts')
     }

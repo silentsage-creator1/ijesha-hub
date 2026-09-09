@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf'
 import type { Certificate } from '@/types'
-import { supabase, supabaseConfigured } from '@/lib/supabase'
+import { cohortRequest } from '@/lib/cohorts'
 
 export const CERTIFICATE_STORAGE_KEY = 'ijesha_digital_hub_certificates'
 export const TEMPLATE_STORAGE_KEY = 'ijesha_digital_hub_certificate_template'
@@ -36,50 +36,11 @@ export const FALLBACK_STUDENTS: Array<{
   cohort: string
 }> = []
 
-export function getStoredCertificates(): Certificate[] {
-  try {
-    const raw = localStorage.getItem(CERTIFICATE_STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as Certificate[]
-      if (Array.isArray(parsed)) {
-        return parsed
-      }
-    }
-  } catch (err) {
-    console.warn('Could not read certificates from localStorage', err)
-  }
-  return []
+export async function getStoredCertificates(): Promise<Certificate[]> {
+  return (await cohortRequest<{certificates:Certificate[]}>('/api/certificates')).certificates
 }
-
-export function saveCertificate(certData: Omit<Certificate, 'id' | 'created_at'>): Certificate {
-  const current = getStoredCertificates()
-  const newCert: Certificate = {
-    ...certData,
-    id: `cert-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    created_at: new Date().toISOString(),
-  }
-  const updated = [newCert, ...current]
-  try {
-    localStorage.setItem(CERTIFICATE_STORAGE_KEY, JSON.stringify(updated))
-  } catch (err) {
-    console.warn('Could not save certificate to localStorage', err)
-  }
-  return newCert
-}
-
-export function getCertificateById(id: string): Certificate | null {
-  const list = getStoredCertificates()
-  return list.find((c) => c.id === id) || null
-}
-
-export function deleteCertificate(id: string): void {
-  const current = getStoredCertificates()
-  const updated = current.filter((c) => c.id !== id)
-  try {
-    localStorage.setItem(CERTIFICATE_STORAGE_KEY, JSON.stringify(updated))
-  } catch (err) {
-    console.warn('Could not update certificates in localStorage', err)
-  }
+export async function saveCertificate(certData: Omit<Certificate, 'id' | 'created_at'>): Promise<Certificate> {
+  return (await cohortRequest<{certificate:Certificate}>('/api/certificates',{method:'POST',body:JSON.stringify(certData)})).certificate
 }
 
 export function getCalibrationSettings(): CertificateTemplateSettings {
@@ -123,34 +84,9 @@ export function resetCustomTemplateUrl(): void {
 /**
  * Loads available students from Supabase (if configured)
  */
-export async function loadAvailableStudents(): Promise<Array<{
-  id: string
-  full_name: string
-  email: string
-  course: string
-  cohort: string
-}>> {
-  if (supabaseConfigured) {
-    try {
-      const { data, error } = await supabase
-        .from('students')
-        .select('id, full_name, email, track, cohort')
-        .order('full_name', { ascending: true })
-
-      if (!error && data && data.length > 0) {
-        return data.map((s) => ({
-          id: s.id,
-          full_name: s.full_name,
-          email: s.email ?? '',
-          course: s.track || 'Unassigned Track',
-          cohort: s.cohort || 'Unassigned Cohort',
-        }))
-      }
-    } catch (err) {
-      console.warn('Could not query Supabase for students', err)
-    }
-  }
-  return []
+export async function loadAvailableStudents(): Promise<Array<{id:string;full_name:string;email:string;course:string;cohort:string}>> {
+  const result=await cohortRequest<{students:Array<{id:string;full_name:string;email:string;track:string;cohort:string}>}>('/api/students')
+  return result.students.map(student=>({...student,course:student.track||'',cohort:student.cohort||''}))
 }
 
 /**
@@ -311,7 +247,7 @@ export async function printCertificate(
     <!DOCTYPE html>
     <html>
       <head>
-        <title>${studentName} - Certificate</title>
+        <title>${studentName.replace(/[<>&"]/g, '')} - Certificate</title>
         <style>
           @page {
             size: A4 landscape;

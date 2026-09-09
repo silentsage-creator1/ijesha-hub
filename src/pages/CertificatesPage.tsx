@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   Award,
   Plus,
@@ -20,11 +20,19 @@ import { getStoredCertificates } from '@/lib/certificates'
 import type { Certificate } from '@/types'
 
 export function CertificatesPage() {
-  const { role, profile } = useAuth()
+  const { role } = useAuth()
   const isAdminOrManager = role === 'admin' || role === 'manager'
 
   // Certificates list state
-  const [certificates, setCertificates] = useState<Certificate[]>(() => getStoredCertificates())
+  const [certificates, setCertificates] = useState<Certificate[]>([])
+  const [error,setError] = useState('')
+  const [loading,setLoading] = useState(true)
+  useEffect(()=>{
+    let active=true
+    setLoading(true);setCertificates([]);setError('')
+    getStoredCertificates().then(rows=>{if(active)setCertificates(rows)}).catch(err=>{if(active)setError(err.message)}).finally(()=>{if(active)setLoading(false)})
+    return ()=>{active=false}
+  },[role])
   const [query, setQuery] = useState('')
   const [selectedStudentFilter, setSelectedStudentFilter] = useState('')
   const [selectedCourseFilter, setSelectedCourseFilter] = useState('')
@@ -56,13 +64,6 @@ export function CertificatesPage() {
   const filteredCertificates = useMemo(() => {
     return certificates
       .filter((cert) => {
-        // If student role, only show own certificates
-        if (role === 'student' && profile?.full_name) {
-          if (!cert.student_name.toLowerCase().includes(profile.full_name.toLowerCase())) {
-            return false
-          }
-        }
-
         // Search query
         if (query.trim()) {
           const q = query.toLowerCase()
@@ -104,7 +105,6 @@ export function CertificatesPage() {
     selectedStatusFilter,
     dateSort,
     role,
-    profile,
   ])
 
   // Summary statistics
@@ -277,6 +277,8 @@ export function CertificatesPage() {
         </div>
       </Card>
 
+      {error && <p role="alert" className="text-[var(--color-danger-600)]">{error}</p>}
+      {loading && <p>Loading certificates…</p>}
       {/* Certificate List (Rule: The student/certificate row must be clickable) */}
       <Card className="overflow-hidden border border-[var(--color-line)]">
         <div className="overflow-x-auto">

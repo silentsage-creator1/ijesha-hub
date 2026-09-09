@@ -40,6 +40,7 @@ import {
   updateUserRole,
 } from '@/lib/management'
 import { StudentVerificationQueue } from '@/components/management/StudentVerificationQueue'
+import { AssignStudentCohort } from '@/components/management/AssignStudentCohort'
 import { sendStudentApprovedNotification } from '@/lib/notifications'
 import { supabase } from '@/lib/supabase'
 import { apiUrl, isPlatformAdminEmail } from '@/app/auth'
@@ -702,6 +703,7 @@ export function UsersManagementPage() {
           </div>
 
           {/* Admin Actions */}
+          {canManage && selectedUser.role === 'student' && <AssignStudentCohort key={selectedUser.id} accountId={selectedUser.id}/>}
           {canManage && (
             <div className="flex flex-wrap items-center gap-2">
               <button

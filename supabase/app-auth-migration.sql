@@ -42,6 +42,7 @@ create table if not exists public.app_courses (
   description text not null default '',
   thumbnail text,
   level text,
+  category text,
   status text not null default 'Draft' check (status in ('Draft', 'Published')),
   content jsonb not null default '[]'::jsonb,
   cohort_id uuid references public.cohorts(id) on delete set null,
@@ -52,6 +53,8 @@ create table if not exists public.app_courses (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.app_courses add column if not exists category text;
 
 -- One shared learning workflow for classwork, assessments and projects.
 create table if not exists public.app_learning_items (

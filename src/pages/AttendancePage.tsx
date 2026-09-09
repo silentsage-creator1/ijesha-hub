@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   Check,
@@ -14,12 +14,12 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '@/components/shell/PageHeader'
 import { Avatar, Badge, Card, SectionHeading } from '@/components/ui/primitives'
-import { Modal } from '@/components/ui/Modal'
-import { Field } from '@/components/ui/Field'
-import { supabase } from '@/lib/supabase'
+
+
+
 import { apiUrl, useAuth } from '@/app/auth'
-import { officialCourses } from '@/lib/courses'
-import { getAllCohorts, type Cohort as StoredCohort } from '@/lib/cohorts'
+
+import { cohortRequest, getAllCohorts, type Cohort as StoredCohort } from '@/lib/cohorts'
 import {
   calculateAttendanceRate,
   formatSessionDate,
@@ -59,6 +59,7 @@ const STATUS_CONFIG: Record<
 export function AttendancePage() {
   const { role, profile } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const isStaff = role === 'admin' || role === 'manager' || role === 'trainer'
@@ -89,14 +90,6 @@ export function AttendancePage() {
 
   // Student search filter in session table
   const [studentSearch, setStudentSearch] = useState('')
-
-  // Add Session modal state
-  const [addSessionModalOpen, setAddSessionModalOpen] = useState(false)
-  const [newTopic, setNewTopic] = useState('')
-  const [newDate, setNewDate] = useState('')
-  const [newWeek, setNewWeek] = useState('1')
-  const [newTrainerName, setNewTrainerName] = useState('John Doe')
-  const [creatingSession, setCreatingSession] = useState(false)
 
   // Loading & error
   const [loading, setLoading] = useState(true)
@@ -134,12 +127,12 @@ export function AttendancePage() {
         }
         const [cohortList, coursesRes] = await Promise.all([
           getAllCohorts(),
-          supabase.from('courses').select('id, name').order('name'),
+          cohortRequest<{ courses: {id:string;title:string}[] }>('/api/courses'),
         ])
 
         if (cancelled) return
 
-        const loadedCourses = officialCourses((coursesRes.data ?? []) as Course[])
+        const loadedCourses = coursesRes.courses.map(c => ({id:c.id,name:c.title})) as Course[]
         const loadedCohorts = cohortList
 
         setCourses(loadedCourses)
@@ -173,8 +166,12 @@ export function AttendancePage() {
 
   // 2. Fetch or initialize cohort data (sessions, students, attendance) when selectedCohortId changes
   useEffect(() => {
-    if (!selectedCohortId) return
     if (isStudent) return
+    setCohortStudents([])
+    setSessions([])
+    setAttendanceRecords([])
+    setSessionFormState({})
+    if (!selectedCohortId) return
     let cancelled = false
 
     async function loadCohortData() {
@@ -185,44 +182,12 @@ export function AttendancePage() {
           setSelectedCourseName(activeCohort.course_name || courses.find((c) => c.id === activeCohort.course_id)?.name || '')
         }
 
-        // Fetch students enrolled or assigned to this cohort
-        const [studentsRes, sessionsRes, attendanceRes] = await Promise.all([
-          supabase.from('students').select('*').order('full_name'),
-          supabase.from('training_sessions').select('*').eq('cohort_id', selectedCohortId).order('starts_at'),
-          supabase.from('attendance').select('*').eq('cohort_id', selectedCohortId),
-        ])
+        const result = await cohortRequest<{students:Student[];sessions:TrainingSession[];attendance:AttendanceRecord[]}>('/api/attendance/cohorts/' + selectedCohortId)
+        if(cancelled) return
+        setCohortStudents(result.students)
+        setSessions(result.sessions)
+        setAttendanceRecords(result.attendance)
 
-        if (cancelled) return
-
-        let studentsList = (studentsRes.data ?? []) as Student[]
-        // Filter students for this cohort or track if specified
-        if (activeCohort) {
-          const cohortFiltered = studentsList.filter(
-            (s) => s.cohort?.toLowerCase() === activeCohort.name.toLowerCase()
-          )
-          if (cohortFiltered.length > 0) {
-            studentsList = cohortFiltered
-          }
-        }
-
-        setCohortStudents(studentsList)
-
-        // Sessions check
-        const loadedSessions = (sessionsRes.data ?? []) as TrainingSession[]
-        setSessions(loadedSessions)
-
-        // Attendance records check
-        const loadedAttendance = (attendanceRes.data ?? []) as AttendanceRecord[]
-        setAttendanceRecords(loadedAttendance)
-
-        // If user is student, find matching student
-        if (profile?.id) {
-          const matched = studentsList.find((s) => s.profile_id === profile.id || s.email === profile.id)
-          if (matched) setCurrentStudent(matched)
-          else setCurrentStudent(studentsList[0] || null)
-        } else {
-          setCurrentStudent(studentsList[0] || null)
-        }
       } catch (err: unknown) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Error loading cohort sessions')
@@ -409,54 +374,10 @@ export function AttendancePage() {
     setError(null)
 
     try {
-      const recordsToUpsert = cohortStudents.map((s) => {
-        const st = sessionFormState[s.id] || 'present'
-        return {
-          id: `att-${activeSession.id}-${s.id}`,
-          training_session_id: activeSession.id,
-          cohort_id: selectedCohortId,
-          student_id: s.id,
-          attended_on: activeSession.starts_at.slice(0, 10),
-          status: st,
-          recorded_by: profile?.id || null,
-        }
+      const result = await cohortRequest<{attendance:AttendanceRecord[]}>('/api/attendance/sessions/' + activeSession.id, {
+        method:'PATCH', body:JSON.stringify({records:cohortStudents.map(student=>({student_id:student.id,status:sessionFormState[student.id] || 'present'}))}),
       })
-
-      // Attempt to save to Supabase
-      try {
-        // Upsert into Supabase attendance table
-        await supabase.from('attendance').upsert(
-          recordsToUpsert.map((r) => ({
-            student_id: r.student_id,
-            cohort_id: r.cohort_id,
-            training_session_id: r.training_session_id,
-            attended_on: r.attended_on,
-            status: r.status,
-            recorded_by: r.recorded_by,
-          })),
-          { onConflict: 'student_id,cohort_id,attended_on' }
-        )
-
-        // Mark training session status as completed
-        await supabase
-          .from('training_sessions')
-          .update({ status: 'completed' })
-          .eq('id', activeSession.id)
-      } catch (dbErr) {
-        // Fallback gracefully if schema constraints or network differ
-        console.warn('Note: saved with local state sync', dbErr)
-      }
-
-      // Update local state immediately for instant feedback
-      setAttendanceRecords((prev) => {
-        const filtered = prev.filter((a) => a.training_session_id !== activeSession.id)
-        return [...filtered, ...recordsToUpsert]
-      })
-
-      setSessions((prev) =>
-        prev.map((s) => (s.id === activeSession.id ? { ...s, status: 'completed' } : s))
-      )
-
+      setAttendanceRecords(prev => [...prev.filter(r=>r.training_session_id !== activeSession.id), ...result.attendance])
       setSaveSuccessMsg(`Attendance saved successfully for ${activeSession.topic}.`)
       setEditingAttendance(false)
 
@@ -466,55 +387,6 @@ export function AttendancePage() {
       setError(err instanceof Error ? err.message : 'Failed to save attendance')
     } finally {
       setSavingAttendance(false)
-    }
-  }
-
-  // Create new session handler
-  const handleCreateSession = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!newTopic.trim() || !newDate) return
-    setCreatingSession(true)
-    setError(null)
-
-    try {
-      const weekNum = parseInt(newWeek, 10) || 1
-      const startsAt = new Date(newDate).toISOString()
-      const endsAt = new Date(new Date(newDate).getTime() + 2 * 3600000).toISOString()
-
-      const newRecord: TrainingSession = {
-        id: `session-${Date.now()}`,
-        cohort_id: selectedCohortId,
-        trainer_id: null,
-        trainer_name: newTrainerName.trim() || 'John Doe',
-        topic: newTopic.trim(),
-        starts_at: startsAt,
-        ends_at: endsAt,
-        status: 'scheduled',
-        week_number: weekNum,
-      }
-
-      // Save to Supabase
-      try {
-        await supabase.from('training_sessions').insert({
-          cohort_id: selectedCohortId,
-          topic: newTopic.trim(),
-          starts_at: startsAt,
-          ends_at: endsAt,
-          status: 'scheduled',
-        })
-      } catch (err) {
-        console.warn('Local session sync', err)
-      }
-
-      setSessions((prev) => [...prev, newRecord])
-      setAddSessionModalOpen(false)
-      setNewTopic('')
-      setNewDate('')
-      setSaveSuccessMsg(`New training session "${newRecord.topic}" scheduled for Week ${weekNum}.`)
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error creating session')
-    } finally {
-      setCreatingSession(false)
     }
   }
 
@@ -531,9 +403,10 @@ export function AttendancePage() {
     let absent = 0
     let late = 0
     let excused = 0
-    const total = cohortStudents.length || 25
+    const total = cohortStudents.length
 
-    Object.values(sessionFormState).forEach((st) => {
+    cohortStudents.forEach((student) => {
+      const st = sessionFormState[student.id]
       if (st === 'present') present++
       else if (st === 'absent') absent++
       else if (st === 'late') late++
@@ -1011,7 +884,7 @@ export function AttendancePage() {
           isStaff && (
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setAddSessionModalOpen(true)}
+                onClick={() => navigate('/sessions?create=1&cohort=' + encodeURIComponent(selectedCohortId))}
                 className="hidden items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-white px-3.5 py-2 text-sm font-medium text-[var(--color-ink-700)] hover:bg-[var(--color-ink-50)] sm:flex"
               >
                 <Plus size={16} />
@@ -1087,7 +960,7 @@ export function AttendancePage() {
         </div>
       </Card>
 
-      {/* Attendance Statistics (Total Students: 25, Present: 21, Absent: 3, Late: 1, Attendance Rate: 84%) */}
+      {/* Attendance statistics from the selected cohort's enrolled students. */}
       <div>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           <Card className="p-4 sm:p-5">
@@ -1151,7 +1024,7 @@ export function AttendancePage() {
           />
           {isStaff && (
             <button
-              onClick={() => setAddSessionModalOpen(true)}
+              onClick={() => navigate('/sessions?create=1&cohort=' + encodeURIComponent(selectedCohortId))}
               className="flex items-center gap-1.5 text-sm font-semibold text-[var(--color-harbor-600)] hover:underline sm:hidden"
             >
               <Plus size={15} /> Add Session
@@ -1235,79 +1108,7 @@ export function AttendancePage() {
         )}
       </div>
 
-      {/* Modal to Schedule/Add Training Session */}
-      {addSessionModalOpen && (
-        <Modal
-          title="Add Training Session"
-          onClose={() => setAddSessionModalOpen(false)}
-        >
-          <form onSubmit={handleCreateSession} className="space-y-4">
-            <Field label="Topic *">
-              <input
-                required
-                className="input"
-                placeholder="e.g. Basic Network Security"
-                value={newTopic}
-                onChange={(e) => setNewTopic(e.target.value)}
-              />
-            </Field>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Training Week *">
-                <select
-                  className="input"
-                  value={newWeek}
-                  onChange={(e) => setNewWeek(e.target.value)}
-                >
-                  <option value="1">Week 1</option>
-                  <option value="2">Week 2</option>
-                  <option value="3">Week 3</option>
-                  <option value="4">Week 4</option>
-                  <option value="5">Week 5</option>
-                  <option value="6">Week 6</option>
-                </select>
-              </Field>
-
-              <Field label="Trainer Name *">
-                <input
-                  required
-                  className="input"
-                  placeholder="e.g. John Doe"
-                  value={newTrainerName}
-                  onChange={(e) => setNewTrainerName(e.target.value)}
-                />
-              </Field>
-            </div>
-
-            <Field label="Session Date & Start Time *">
-              <input
-                required
-                type="datetime-local"
-                className="input"
-                value={newDate}
-                onChange={(e) => setNewDate(e.target.value)}
-              />
-            </Field>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setAddSessionModalOpen(false)}
-                className="rounded-[var(--radius-md)] border border-[var(--color-line)] px-3.5 py-2 text-sm font-medium text-[var(--color-ink-700)]"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={creatingSession}
-                type="submit"
-                className="rounded-[var(--radius-md)] bg-[var(--color-harbor-500)] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[var(--color-harbor-600)]"
-              >
-                {creatingSession ? 'Scheduling…' : 'Schedule Session'}
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
     </div>
   )
 }

@@ -110,3 +110,41 @@ npm run dev
 - **"registration is awaiting in-app administrator approval"** — sign in with
   the administrator account and approve the account through the application
   backend's protected approval endpoint.
+# Application-backend workflow deployment
+
+The student roster, cohort assignment, sessions, attendance, shared learning work,
+profile editor and issued certificates use the application API. Keep the
+Supabase service-role key on the backend only.
+
+For existing installations, apply these SQL files in the Supabase SQL Editor
+before deploying the corresponding frontend/backend update:
+
+1. `supabase/course-cohort-migration.sql`
+2. `supabase/session-design-migration.sql`
+3. `supabase/attendance-session-migration.sql`
+4. `supabase/student-cohort-assignment.sql`
+5. `supabase/create-app-student.sql`
+6. `supabase/profile-certificates-migration.sql`
+
+Do not rerun the entire legacy schema merely to install these updates. Existing
+browser-only certificate records are not trusted or automatically imported as
+official database records. Template preferences may remain local, but each new
+issued certificate stores its template and layout with its shared record.
+
+Validation commands:
+
+```powershell
+npm run build
+node --test server/session-validation.test.mjs
+node --env-file-if-exists=.env.server server/live-workflow-test.mjs --run
+```
+
+The last command explicitly opts into live database testing. It uses port 3019,
+creates uniquely named test accounts and learning records, and removes only its
+own fixtures afterward. Do not run it against another database unintentionally.
+If interrupted, inspect the printed test-run prefix before removing any fixture.
+
+Vercel needs `VITE_API_URL` pointing to the Render API origin. Render needs the
+server-only database credentials and `APP_ORIGIN` matching the frontend origin.
+After deployment, `/api/health` reports the backend deployment version; verify
+both services updated, not just the frontend.

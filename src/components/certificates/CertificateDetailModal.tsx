@@ -18,7 +18,7 @@ import { CertificateCanvas } from './CertificateCanvas'
 import {
   downloadCertificatePdf,
   printCertificate,
-  getCalibrationSettings,
+  DEFAULT_CALIBRATION,
   getCertificateFileName,
 } from '@/lib/certificates'
 import type { Certificate } from '@/types'
@@ -35,7 +35,8 @@ export function CertificateDetailModal({
   const [downloading, setDownloading] = useState(false)
   const [printing, setPrinting] = useState(false)
   const [copied, setCopied] = useState(false)
-  const calibration = getCalibrationSettings()
+  const calibration = certificate.calibration ?? DEFAULT_CALIBRATION
+  const templateUrl = certificate.template_url || '/certificate-template.jpg'
 
   const handleDownload = async () => {
     try {
@@ -43,7 +44,7 @@ export function CertificateDetailModal({
       await downloadCertificatePdf(
         certificate.student_name,
         calibration,
-        certificate.template_url
+        templateUrl
       )
     } catch (err) {
       console.error('Download failed', err)
@@ -58,7 +59,7 @@ export function CertificateDetailModal({
       await printCertificate(
         certificate.student_name,
         calibration,
-        certificate.template_url
+        templateUrl
       )
     } catch (err) {
       console.error('Print failed', err)
@@ -228,7 +229,7 @@ export function CertificateDetailModal({
               studentName={certificate.student_name}
               showEditBoundary={false}
               calibration={calibration}
-              templateUrl={certificate.template_url}
+              templateUrl={templateUrl}
               className="shadow-2xl ring-1 ring-[var(--color-ink-900)]/10"
             />
           </div>

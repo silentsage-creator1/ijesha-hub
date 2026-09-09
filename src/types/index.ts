@@ -272,7 +272,7 @@ export interface Certificate {
   certificate_type: string
   issue_date: string
   status: CertificateStatus
+  calibration?: import('@/lib/certificates').CertificateTemplateSettings | null
   template_url?: string
   created_at?: string
 }
-
