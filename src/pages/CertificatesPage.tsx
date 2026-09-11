@@ -184,7 +184,7 @@ export function CertificatesPage() {
       </div>
 
       {/* Search & Filters Toolbar */}
-      <Card className="p-4 space-y-3">
+      {isAdminOrManager && <Card className="p-4 space-y-3">
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
           {/* Search Certificates */}
           <div className="relative flex-1 min-w-[220px]">
@@ -277,6 +277,7 @@ export function CertificatesPage() {
         </div>
       </Card>
 
+      }
       {error && <p role="alert" className="text-[var(--color-danger-600)]">{error}</p>}
       {loading && <p>Loading certificates…</p>}
       {/* Certificate List (Rule: The student/certificate row must be clickable) */}

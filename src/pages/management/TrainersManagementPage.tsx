@@ -59,7 +59,7 @@ export function TrainersManagementPage() {
     bio: '',
   })
 
-  const [selectedCourseToAssign, setSelectedCourseToAssign] = useState('Cyber Security')
+  const [selectedCourseToAssign, setSelectedCourseToAssign] = useState('')
   const [selectedCohortToAssign, setSelectedCohortToAssign] = useState('Cohort A')
 
   useEffect(() => {
@@ -97,6 +97,31 @@ export function TrainersManagementPage() {
     return () => { active = false }
   }, [])
 
+  const [courses,setCourses] = useState<Array<{id:string;title:string;trainer_id:string|null}>>([])
+  const [courseBusy,setCourseBusy] = useState(false)
+  const [courseError,setCourseError] = useState('')
+  useEffect(()=>{
+    fetch(apiUrl('/api/courses'),{credentials:'include'}).then(async response=>{
+      const payload=await response.json()
+      if(!response.ok)throw new Error(payload.error||'Unable to load courses.')
+      setCourses(payload.courses)
+    }).catch(err=>setCourseError(err.message))
+  },[])
+  useEffect(()=>{
+    setTrainers(current=>current.map(t=>({...t,courses:courses.filter(c=>c.trainer_id===t.id).map(c=>c.title)})))
+  },[courses,trainers.length])
+  async function assignCourse(courseId:string,trainerId:string|null) {
+    if(!canManage||courseBusy)return
+    setCourseBusy(true);setCourseError('')
+    try{
+      const response=await fetch(apiUrl('/api/courses/'+courseId),{method:'PATCH',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({trainerId})})
+      const payload=await response.json()
+      if(!response.ok)throw new Error(payload.error||'Unable to change course assignment.')
+      setCourses(current=>current.map(c=>c.id===courseId?payload.course:c))
+      setIsAssignCourseModalOpen(false)
+    }catch(err){setCourseError(err instanceof Error?err.message:'Unable to update course.')}
+    finally{setCourseBusy(false)}
+  }
   // Selected trainer
   const selectedTrainer = useMemo(() => {
     return trainers.find((t) => t.id === selectedTrainerId) || null
@@ -172,25 +197,10 @@ export function TrainersManagementPage() {
   // Action: Assign Course
   const handleAssignCourse = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedTrainer) return
-    if (!selectedTrainer.courses.includes(selectedCourseToAssign)) {
-      const newCourses = [...selectedTrainer.courses, selectedCourseToAssign]
-      const updated = trainers.map((t) =>
-        t.id === selectedTrainer.id ? { ...t, courses: newCourses } : t
-      )
-      setTrainers(updated)
-      saveStoredTrainers(updated)
-
-      logSystemActivity(
-        profile?.full_name || user?.name || 'Administrator',
-        role || 'admin',
-        'Assigned Course to Trainer',
-        `${selectedCourseToAssign} → ${selectedTrainer.fullName}`,
-        'Course',
-        `Added course ${selectedCourseToAssign} to trainer instructional catalog.`
-      )
-    }
-    setIsAssignCourseModalOpen(false)
+    if(!selectedTrainer||!selectedCourseToAssign)return
+    const course=courses.find(c=>c.id===selectedCourseToAssign)
+    if(course?.trainer_id&&course.trainer_id!==selectedTrainer.id&&!window.confirm('This course has another trainer. Reassign it?'))return
+    void assignCourse(selectedCourseToAssign,selectedTrainer.id)
   }
 
   // Action: Assign Cohort
@@ -409,7 +419,7 @@ export function TrainersManagementPage() {
           <Card className="p-5 space-y-4">
             <h2 className="text-sm font-bold text-[var(--color-ink-900)] flex items-center gap-2">
               <BookOpen size={16} className="text-[var(--color-harbor-600)]" />
-              <span>Assigned Courses & Active Cohorts</span>
+              <span>Assigned Courses & Active Cohorts</span>{courseError&&<p role="alert">{courseError}</p>}
             </h2>
 
             <div>
@@ -417,12 +427,12 @@ export function TrainersManagementPage() {
                 Courses Taught
               </span>
               <div className="flex flex-wrap gap-2">
-                {selectedTrainer.courses.map((c) => (
+                {courses.filter(c=>c.trainer_id===selectedTrainer.id).map((c) => (
                   <span
-                    key={c}
+                    key={c.id}
                     className="px-2.5 py-1 bg-[var(--color-harbor-50)] text-[var(--color-harbor-700)] border border-[var(--color-harbor-200)] text-xs rounded-md font-medium"
                   >
-                    {c}
+                    {c.title}{canManage&&<button type="button" disabled={courseBusy} onClick={()=>{if(window.confirm(`Remove ${c.title} from this trainer?`))void assignCourse(c.id,null)}} className="ml-2 underline">Remove</button>}
                   </span>
                 ))}
               </div>
@@ -655,7 +665,7 @@ export function TrainersManagementPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
             <div className="w-full max-w-sm bg-white rounded-xl shadow-2xl p-6 space-y-4 border border-[var(--color-line)]">
               <h2 className="text-base font-bold text-[var(--color-ink-900)]">Assign Course to Trainer</h2>
-              <form onSubmit={handleAssignCourse} className="space-y-4 text-xs">
+              <form onSubmit={handleAssignCourse} className="space-y-4 text-xs">{courseError&&<p role="alert">{courseError}</p>}
                 <div>
                   <label className="block text-[11px] font-semibold text-[var(--color-ink-700)] mb-1">
                     Select Course Track
@@ -665,11 +675,7 @@ export function TrainersManagementPage() {
                     onChange={(e) => setSelectedCourseToAssign(e.target.value)}
                     className="input"
                   >
-                    <option value="Cyber Security">Cyber Security</option>
-                    <option value="Full-Stack Web Development">Full-Stack Web Development</option>
-                    <option value="Data Analytics">Data Analytics</option>
-                    <option value="Python for AI">Python for AI</option>
-                    <option value="UI/UX Product Design">UI/UX Product Design</option>
+                    <option value="">Select a course</option>{courses.map(c=><option key={c.id} value={c.id}>{c.title}</option>)}
                   </select>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
@@ -987,10 +993,7 @@ export function TrainersManagementPage() {
                     onChange={(e) => setSelectedCourseToAssign(e.target.value)}
                     className="input"
                   >
-                    <option value="Cyber Security">Cyber Security</option>
-                    <option value="Full-Stack Web Development">Full-Stack Web</option>
-                    <option value="Data Analytics">Data Analytics</option>
-                    <option value="UI/UX Product Design">UI/UX Design</option>
+                    <option value="">Select a course</option>{courses.map(c=><option key={c.id} value={c.id}>{c.title}</option>)}
                   </select>
                 </div>
 

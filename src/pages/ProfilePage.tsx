@@ -6,7 +6,7 @@ import { cohortRequest } from '@/lib/cohorts'
 
 const personal = ['first_name','middle_name','last_name','date_of_birth','gender','phone_number','home_address','state','lga','city_town']
 const guardian = ['guardian_first_name','guardian_last_name','guardian_relationship','guardian_phone','guardian_alt_phone','guardian_email','guardian_address']
-const certificate = ['certificate_number','final_score','completion_status','training_start_date','training_completion_date','certificate_issue_date','total_training_hours']
+const certificate = ['certificate_name','certificate_number','final_score','completion_status','training_start_date','training_completion_date','certificate_issue_date','total_training_hours']
 type Data = { user: { full_name:string; email:string; role:string; organization:string }; details:Record<string,string | number | null>; photo:string|null; cohort:{name:string;course_name:string}|null }
 const label = (key:string) => key.split('_').map(word=>word[0].toUpperCase()+word.slice(1)).join(' ')
 
@@ -19,6 +19,8 @@ export function ProfilePage() {
   const [error,setError] = useState('')
   const [notice,setNotice] = useState('')
   const [saving,setSaving] = useState(false)
+  const requiredPersonal = personal.filter(key=>key!=='middle_name')
+  const completion = Math.round((requiredPersonal.filter(key=>String(details[key]??'').trim()).length+((photo||data?.photo)?1:0))/(requiredPersonal.length+1)*100)
   const displayName = data?.user.role==='student' && details.first_name && details.last_name
     ? [details.first_name,details.middle_name,details.last_name].filter(Boolean).join(' ')
     : name
@@ -47,6 +49,7 @@ export function ProfilePage() {
     {error&&<p role="alert" className="text-[var(--color-danger-600)]">{error}</p>}
     {!data ? <p>{error?'Profile could not be loaded. Refresh to retry.':'Loading profile…'}</p> :
     <form onSubmit={save} className="max-w-4xl space-y-5">
+      {data.user.role==='student'&&<Card className="p-5 space-y-2"><p className="font-semibold">Profile Completion: {completion}%</p>{completion<100&&<><h2>Complete your profile</h2><p>Complete all required personal details and add a profile photo to finish setting up your profile.</p></>}</Card>}
       <Card className="space-y-4 p-5">
         {(photo||data.photo)&&<img src={photo||data.photo||''} alt="Profile" className="h-24 w-24 rounded-full object-cover"/>}
         <label className="block text-sm">Profile photo ({data.user.role==='student'?'needed to complete your profile':'optional'}, PNG/JPEG/WebP under 1 MB)<input className="input mt-1" type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>{
@@ -61,10 +64,10 @@ export function ProfilePage() {
       {data.user.role==='student'&&<>
         <Card className="space-y-3 p-5"><h2>Enrollment</h2><p>Course: {data.cohort?.course_name||'Not assigned'}</p><p>Cohort: {data.cohort?.name||'Not assigned'}</p></Card>
         <Card className="space-y-4 p-5"><h2>Parent or guardian</h2>{fields(guardian)}</Card>
-        <Card className="space-y-4 p-5"><h2>Certificate information</h2>{fields(['certificate_name'])}<p className="text-sm">The following records are managed by staff.</p>{certificate.map(key=><p key={key} className="text-sm">{label(key)}: {details[key]??'Not available yet'}</p>)}</Card>
+        <Card className="space-y-4 p-5"><h2>Certificate information</h2><p className="text-sm">These records are managed by staff.</p>{certificate.map(key=><p key={key} className="text-sm">{label(key)}: {details[key]??'Not available yet'}</p>)}</Card>
       </>}
       {notice&&<p role="status">{notice}</p>}
-      <button disabled={saving} className="rounded-[var(--radius-md)] bg-[var(--color-harbor-500)] px-4 py-2 text-white disabled:opacity-50">{saving?'Saving…':'Save profile'}</button>
+      <div className="flex gap-3"><button disabled={saving} className="rounded-[var(--radius-md)] border border-[var(--color-line)] px-4 py-2 disabled:opacity-50">{saving?'Saving…':'Save Progress'}</button><button disabled={saving} className="rounded-[var(--radius-md)] bg-[var(--color-harbor-500)] px-4 py-2 text-white disabled:opacity-50">{saving?'Saving…':'Save Changes'}</button></div>
     </form>}
   </div>
 }

@@ -1,4 +1,4 @@
-const personalFields = ['first_name','middle_name','last_name','date_of_birth','gender','phone_number','home_address','state','lga','city_town','guardian_first_name','guardian_last_name','guardian_relationship','guardian_phone','guardian_alt_phone','guardian_email','guardian_address','certificate_name']
+const personalFields = ['first_name','middle_name','last_name','date_of_birth','gender','phone_number','home_address','state','lga','city_town','guardian_first_name','guardian_last_name','guardian_relationship','guardian_phone','guardian_alt_phone','guardian_email','guardian_address']
 import { studentProfileComplete } from './profile-completion.mjs'
 function checked(result) { if (result.error) throw result.error; return result.data }
 
@@ -43,10 +43,14 @@ export async function profileCertificates({ request, response, account, db, body
     return true
   }
   const staff = ['admin','manager'].includes(account.role)
-  if (!staff && account.role !== 'student') { json(response,403,{error:'Certificate access is not available for this role.'},cors); return true }
+  if (!staff && !['student','parent'].includes(account.role)) { json(response,403,{error:'Certificate access is not available for this role.'},cors); return true }
   if (request.method === 'GET') {
     let query = db.from('app_certificates').select('*').order('created_at',{ascending:false})
-    if (!staff) {
+    if (account.role === 'parent') {
+      const links = checked(await db.from('app_parent_links').select('student_id').eq('parent_id', account.id))
+      if (!links.length) { json(response,200,{certificates:[]},cors); return true }
+      query = query.in('student_id', links.map(link => link.student_id)).eq('status','Issued')
+    } else if (!staff) {
       const context = await studentLearningContext(account)
       if (!context.student) { json(response,200,{certificates:[]},cors); return true }
       query = query.eq('student_id',context.student.id).eq('status','Issued')

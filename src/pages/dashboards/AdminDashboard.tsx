@@ -16,7 +16,6 @@ import { PageHeader } from '@/components/shell/PageHeader'
 import { Card, SectionHeading } from '@/components/ui/primitives'
 import { StatCard, ActivityFeed, type ActivityRow } from '@/components/dashboard/blocks'
 import { apiUrl, useAuth } from '@/app/auth'
-import { supabase, supabaseConfigured } from '@/lib/supabase'
 import {
   getPendingStudentVerifications,
   setStudentVerificationStatus,
@@ -57,87 +56,33 @@ export function AdminDashboard() {
 
   const loadData = useCallback(async () => {
     setLoading(true)
-    if (!supabaseConfigured) {
-      setCounts({
-        students: 0,
-        trainers: 0,
-        cohorts: 0,
-        courses: 0,
-        certificates: 0,
-      })
-      setCohortStatus({ upcoming: 0, active: 0, completed: 0 })
-      setTrackBreakdown([])
-      setActivity([])
-      setLoading(false)
-      return
-    }
-
     try {
-      const [studentsRes, profilesRes, teachersRes, cohortsRes, coursesRes, certsRes] = await Promise.all([
-        supabase.from('students').select('id, track, organization'),
-        supabase.from('profiles').select('id, full_name, role, created_at').order('created_at', { ascending: false }).limit(6),
-        supabase.from('teachers').select('id', { count: 'exact', head: true }),
-        supabase.from('cohorts').select('id, status, name'),
-        supabase.from('courses').select('id, name'),
-        supabase.from('certificates').select('id', { count: 'exact', head: true }),
-      ])
-
-      const sList = studentsRes.data ?? []
-      const cList = cohortsRes.data ?? []
-      const pList = profilesRes.data ?? []
-
-      // Calculate cohort status
-      let upcoming = 0
-      let active = 0
-      let completed = 0
-      cList.forEach((c) => {
-        const s = (c as any).status?.toLowerCase()
-        if (s === 'completed') completed++
-        else if (s === 'upcoming') upcoming++
-        else active++
-      })
-      setCohortStatus({ upcoming, active, completed })
-
-      // Calculate track distribution
-      const trackCounts: Record<string, number> = {}
-      sList.forEach((st) => {
-        const t = st.track || 'General Training'
-        trackCounts[t] = (trackCounts[t] || 0) + 1
-      })
-      const tracks = Object.entries(trackCounts).map(([k, v]) => ({
-        label: k,
-        value: `${v} student${v === 1 ? '' : 's'}`,
+      const payloads = await Promise.all(['/api/students','/api/admin/accounts','/api/cohorts','/api/courses','/api/certificates'].map(async path => {
+        const response = await fetch(apiUrl(path), { credentials: 'include' })
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.error || 'Unable to load dashboard totals.')
+        return payload
       }))
-      setTrackBreakdown(tracks.length > 0 ? tracks : [
-        { label: 'Unassigned', value: `${sList.length} enrolled` },
-      ])
-
-      // Recent real activity from profiles
-      const recentRows: ActivityRow[] = pList.map((p, idx) => ({
-        id: p.id || String(idx),
-        text: `${p.full_name || 'User'} (${p.role || 'student'}) joined the platform`,
-        time: p.created_at ? new Date(p.created_at).toLocaleDateString() : 'Recent',
-      }))
-      setActivity(recentRows)
-
-      // Total students count includes both students table and profile students
-      const studentIds = new Set(sList.map(s => s.id))
-      pList.forEach(p => {
-        if (p.role === 'student') studentIds.add(p.id)
-      })
-
-      setCounts({
-        students: Math.max(sList.length, studentIds.size),
-        trainers: teachersRes.count ?? pList.filter(p => p.role === 'trainer').length,
-        cohorts: cList.length,
-        courses: coursesRes.data?.length ?? 0,
-        certificates: certsRes.count ?? 0,
-      })
-    } catch (err) {
-      console.warn('Admin dashboard load error:', err)
-    } finally {
-      setLoading(false)
-    }
+      const [students, accounts, cohorts, courses, certificates] = payloads
+      setCounts({students:students.students.length,trainers:accounts.users.filter((a:AppAccount)=>a.role==='trainer').length,cohorts:cohorts.cohorts.length,courses:courses.courses.length,certificates:certificates.certificates.filter((c:{status:string})=>c.status==='Issued').length})
+      const today = new Date().toISOString().slice(0,10)
+      const status = { upcoming:0,active:0,completed:0 }
+      for (const c of cohorts.cohorts) {
+        if (c.ends_on && c.ends_on < today) status.completed++
+        else if (c.starts_on && c.starts_on > today) status.upcoming++
+        else status.active++
+      }
+      setCohortStatus(status)
+      const tracks:Record<string,number> = {}
+      for (const student of students.students) {
+        const track = student.track || 'Unassigned'
+        tracks[track] = (tracks[track] || 0) + 1
+      }
+      setTrackBreakdown(Object.entries(tracks).map(([label,count])=>({label,value:`${count} student${count===1?'':'s'}`})))
+      setActivity(accounts.users.slice(0,6).map((a:AppAccount)=>({id:a.id,text:`${a.full_name} (${a.role}) joined the platform`,time:new Date(a.created_at).toLocaleDateString()})))
+      setAppAccountError(null)
+    } catch(err) { setAppAccountError(err instanceof Error ? err.message : 'Unable to load dashboard totals.') }
+    finally { setLoading(false) }
   }, [])
 
   const loadVerifications = useCallback(() => {

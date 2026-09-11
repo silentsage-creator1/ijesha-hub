@@ -39,6 +39,7 @@ import {
   updateUserRole,
 } from '@/lib/management'
 import { StudentVerificationQueue } from '@/components/management/StudentVerificationQueue'
+import { StudentProfileRecord } from '@/components/management/StudentProfileRecord'
 import { AssignStudentCohort } from '@/components/management/AssignStudentCohort'
 import { sendStudentApprovedNotification } from '@/lib/notifications'
 import { supabase } from '@/lib/supabase'
@@ -62,6 +63,7 @@ type ApplicationAccount = {
   role: Role
   track?: string | null
   approval_status: 'pending' | 'approved' | 'rejected'
+  is_active: boolean
   created_at: string
 }
 
@@ -105,7 +107,7 @@ export function UsersManagementPage() {
         fullName: account.full_name,
         email: account.email,
         role: account.role,
-        status: account.approval_status === 'rejected' ? 'suspended' : 'active',
+        status: account.is_active === false ? 'inactive' : account.approval_status === 'rejected' ? 'suspended' : 'active',
         accountType: account.role === 'student' ? 'External Beneficiary' : 'Internal Staff',
         phone: '',
         department: account.track || '',
@@ -363,23 +365,19 @@ export function UsersManagementPage() {
   }, [users, searchQuery, roleFilter, statusFilter, accountTypeFilter])
 
   // Action: Toggle Status (Activate / Deactivate)
-  const handleToggleStatus = (targetUser: ManagedUser, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation()
-    const nextStatus: UserStatus = targetUser.status === 'active' ? 'inactive' : 'active'
-    const updated = users.map((u) =>
-      u.id === targetUser.id ? { ...u, status: nextStatus } : u
-    )
-    setUsers(updated)
-    saveStoredUsers(updated)
-
-    logSystemActivity(
-      profile?.full_name || user?.name || 'Administrator',
-      currentAdminRole || 'admin',
-      nextStatus === 'active' ? 'Activated User Account' : 'Deactivated User Account',
-      targetUser.fullName,
-      'User',
-      `Account access for ${targetUser.fullName} updated to ${nextStatus}.`
-    )
+  const handleToggleStatus = async (targetUser: ManagedUser, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    if (!canManage) return
+    const active = targetUser.status !== 'active'
+    try {
+      const response = await fetch(apiUrl(`/api/admin/accounts/${targetUser.id}/access`), {
+        method: 'PATCH', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ active }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Unable to change account access.')
+      await loadApplicationAccounts()
+      showToast(active ? 'Account reactivated. Approval is still required before sign-in.' : 'Account deactivated. Login and existing sessions are blocked.', 'success')
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to change account access.', 'error') }
   }
 
   // Action: Save Edit User
@@ -743,6 +741,7 @@ export function UsersManagementPage() {
         </Card>
 
         {/* Modal: Edit User */}
+        {selectedUser.role === 'student' && <StudentProfileRecord accountId={selectedUser.id} />}
         {isEditModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
             <div className="w-full max-w-md bg-white rounded-xl shadow-2xl p-6 space-y-4 border border-[var(--color-line)]">

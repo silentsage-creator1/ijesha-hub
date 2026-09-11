@@ -24,3 +24,6 @@ test('approved account with a valid session remains authenticated', async () => 
   const account = { id: 'student', approval_status: 'approved' }
   assert.deepEqual(await lookup([validSession, { data: account }]), account)
 })
+test('deactivated accounts cannot use an existing session', async () => {
+  assert.equal(await lookup([validSession, { data: { approval_status: 'approved', is_active: false } }]), null)
+})

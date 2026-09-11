@@ -136,7 +136,7 @@ async function currentUser(request) {
   if (!session || new Date(session.expires_at).getTime() <= Date.now()) return null
   const { data: account, error: accountError } = await db.from('app_auth_users').select('*').eq('id', session.user_id).maybeSingle()
   if (accountError) throw new Error('Unable to verify your account right now. Please try again.')
-  return account?.approval_status === 'approved' ? account : null
+  return account?.approval_status === 'approved' && account.is_active !== false ? account : null
 }
 
 async function canTeachCohort(account, cohortId) {
@@ -253,6 +253,7 @@ createServer(async (request, response) => {
         return json(response, 401, { error: message }, cors)
       }
       if (!passwordMatches(password, account.password_hash)) return json(response, 401, { error: 'Invalid email or password.' }, cors)
+      if (account.is_active === false) return json(response, 403, { error: 'Your account is deactivated. An administrator must reactivate it before you can sign in.' }, cors)
       if (account.approval_status === 'pending') return json(response, 403, { error: 'Your registration is awaiting in-app administrator approval.' }, cors)
       if (account.approval_status === 'rejected') return json(response, 403, { error: 'This account has not been approved.' }, cors)
       if (account.approval_status !== 'approved') return json(response, 403, { error: 'Administrator approval is required before signing in.' }, cors)
@@ -338,7 +339,7 @@ createServer(async (request, response) => {
     if (request.method === 'GET' && request.url === '/api/admin/accounts') {
       const account = await currentUser(request)
       if (!account || !['admin', 'manager'].includes(account.role)) return json(response, 403, { error: 'Administrator access is required.' }, cors)
-      const { data, error } = await db.from('app_auth_users').select('id, email, full_name, role, organization, track, approval_status, created_at').order('created_at', { ascending: false })
+      const { data, error } = await db.from('app_auth_users').select('id, email, full_name, role, organization, track, approval_status, is_active, created_at').order('created_at', { ascending: false })
       if (error) throw error
       return json(response, 200, { users: data }, cors)
     }
@@ -374,6 +375,26 @@ createServer(async (request, response) => {
       const accounts = await db.from('app_auth_users').select('id,student_id,email,role')
       if (accounts.error) throw accounts.error
       return json(response,200,{students:studentRoleRoster(result.data ?? [], accounts.data ?? [])},cors)
+    }
+    if (request.method === 'POST' && request.url === '/api/students/assign-cohort') {
+      const actor = await currentUser(request)
+      if (!actor || actor.role !== 'admin') return json(response, 403, { error: 'Administrator access is required.' }, cors)
+      const input = await body(request)
+      const ids = [...new Set(Array.isArray(input.studentIds) ? input.studentIds : [])]
+      if (!ids.length || ids.length > 100 || ids.some(id => typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id))) throw new Error('Select between 1 and 100 students.')
+      const cohort = await db.from('cohorts').select('id,app_course_id,ends_on').eq('id', input.cohortId).single()
+      if (cohort.error) throw cohort.error
+      if (!cohort.data.app_course_id || (cohort.data.ends_on && cohort.data.ends_on < new Date().toISOString().slice(0,10))) throw new Error('Choose a current or upcoming cohort linked to a course.')
+      const accounts = await db.from('app_auth_users').select('id,student_id,role,approval_status').in('student_id', ids)
+      if (accounts.error) throw accounts.error
+      const results = []
+      for (const studentId of ids) {
+        const account = accounts.data.find(a => a.student_id === studentId && a.role === 'student' && a.approval_status === 'approved')
+        if (!account) { results.push({studentId,error:'No approved linked student account.'}); continue }
+        const result = await db.rpc('assign_app_student_cohort', { account_id:account.id,target_cohort_id:cohort.data.id })
+        results.push({studentId,error:result.error ? result.error.message : null})
+      }
+      return json(response,200,{results},cors)
     }
     const studentDetailMatch = request.url?.match(/^\/api\/students\/([0-9a-f-]{36})$/i)
     if (studentDetailMatch && request.method === 'GET') {
@@ -668,6 +689,16 @@ createServer(async (request, response) => {
       if (existingError) throw existingError
       if (account.role === 'trainer' && existing.trainer_id !== account.id) return json(response, 403, { error: 'This course is not assigned to you.' }, cors)
       const input = await body(request)
+      if (account.role !== 'trainer' && input.trainerId && input.trainerId !== existing.trainer_id) {
+        const trainer = await db.from('app_auth_users').select('id,role,approval_status,is_active').eq('id',input.trainerId).single()
+        if (trainer.error) throw trainer.error
+        if (trainer.data.role !== 'trainer' || trainer.data.approval_status !== 'approved' || trainer.data.is_active === false) throw new Error('Choose an approved, active trainer.')
+      }
+      if (account.role !== 'trainer' && input.cohortId && input.cohortId !== existing.cohort_id) {
+        const cohort = await db.from('cohorts').select('app_course_id').eq('id',input.cohortId).single()
+        if (cohort.error) throw cohort.error
+        if (cohort.data.app_course_id !== existing.id) throw new Error('Choose a cohort belonging to this course.')
+      }
       const patch = account.role === 'trainer'
         ? { content: Array.isArray(input.modules) ? input.modules : existing.content, updated_at: new Date().toISOString() }
         : {
@@ -816,6 +847,20 @@ createServer(async (request, response) => {
       return json(response, 200, { user: publicUser(data) }, cors)
     }
 
+    const accessMatch = request.url?.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})\/access$/i)
+    if (request.method === 'PATCH' && accessMatch) {
+      const actor = await currentUser(request)
+      if (!actor || actor.role !== 'admin') return json(response, 403, { error: 'Administrator access is required.' }, cors)
+      const input = await body(request)
+      if (typeof input.active !== 'boolean') throw new Error('Choose whether this account is active.')
+      if (actor.id === accessMatch[1]) return json(response, 409, { error: 'You cannot deactivate your own account.' }, cors)
+      const target = await db.from('app_auth_users').select('id,role').eq('id', accessMatch[1]).single()
+      if (target.error) throw target.error
+      if (target.data.role === 'admin') return json(response, 409, { error: 'Change this administrator to a non-administrator role before deactivating it.' }, cors)
+      const result = await db.from('app_auth_users').update({ is_active: input.active }).eq('id', target.data.id).select('id,is_active').single()
+      if (result.error) throw result.error
+      return json(response, 200, { account: result.data }, cors)
+    }
     const deleteAccountMatch = request.url?.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})$/i)
     if (request.method === 'DELETE' && deleteAccountMatch) {
       const actor = await currentUser(request)
