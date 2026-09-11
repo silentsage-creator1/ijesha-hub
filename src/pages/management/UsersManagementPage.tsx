@@ -42,7 +42,7 @@ import { StudentVerificationQueue } from '@/components/management/StudentVerific
 import { AssignStudentCohort } from '@/components/management/AssignStudentCohort'
 import { sendStudentApprovedNotification } from '@/lib/notifications'
 import { supabase } from '@/lib/supabase'
-import { apiUrl, isPlatformAdminEmail } from '@/app/auth'
+import { apiUrl } from '@/app/auth'
 import type { Role } from '@/types'
 import { useAuth } from '@/app/auth'
 
@@ -70,7 +70,7 @@ export function UsersManagementPage() {
   const { user, profile, role: currentAdminRole } = useAuth()
   const canManage = currentAdminRole === 'admin'
 
-  const [users, setUsers] = useState<ManagedUser[]>(getStoredUsers())
+  const [users, setUsers] = useState<ManagedUser[]>([])
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
 
   const [searchParams, setSearchParams] = useSearchParams()
@@ -100,6 +100,22 @@ export function UsersManagementPage() {
       const payload = await response.json() as { users?: ApplicationAccount[] }
       if (!response.ok) throw new Error('Unable to load application accounts.')
       setApplicationAccounts(payload.users ?? [])
+      const directory: ManagedUser[] = (payload.users ?? []).map(account => ({
+        id: account.id,
+        fullName: account.full_name,
+        email: account.email,
+        role: account.role,
+        status: account.approval_status === 'rejected' ? 'suspended' : 'active',
+        accountType: account.role === 'student' ? 'External Beneficiary' : 'Internal Staff',
+        phone: '',
+        department: account.track || '',
+        lastLogin: account.approval_status === 'pending' ? 'Awaiting approval' : 'Application account',
+        createdAt: new Date(account.created_at).toLocaleDateString(),
+        permissionsCount: account.role === 'admin' ? 12 : account.role === 'manager' ? 8 : account.role === 'trainer' ? 6 : 4,
+        recentActivity: [],
+      }))
+      setUsers(directory)
+      saveStoredUsers(directory)
     } catch (error) {
       console.warn('Could not load application accounts:', error)
     }
@@ -128,183 +144,7 @@ export function UsersManagementPage() {
   // browser-local queue is retained only for legacy cleanup utilities.
   const verificationQueue = applicationVerifications
 
-  // Fetch real users from Supabase (profiles, students, teachers)
-  useEffect(() => {
-    async function loadAllDatabaseUsers() {
-      try {
-        const [profilesRes, studentsRes, teachersRes, applicationAccountsRes] = await Promise.all([
-          supabase.from('profiles').select('*').order('created_at', { ascending: false }),
-          supabase.from('students').select('*'),
-          supabase.from('teachers').select('*'),
-          fetch(apiUrl('/api/admin/accounts'), { credentials: 'include' }),
-        ])
-
-        const profiles = profilesRes.data ?? []
-        const students = studentsRes.data ?? []
-        const teachers = teachersRes.data ?? []
-
-        const studentMap = new Map<string, any>()
-        students.forEach((st) => {
-          if (st.profile_id) studentMap.set(st.profile_id, st)
-          if (st.email) studentMap.set(st.email.toLowerCase(), st)
-        })
-
-        const teacherMap = new Map<string, any>()
-        teachers.forEach((t) => {
-          if (t.profile_id) teacherMap.set(t.profile_id, t)
-          if (t.email) teacherMap.set(t.email.toLowerCase(), t)
-        })
-
-        const mapped: ManagedUser[] = profiles.map((p) => {
-          const st = studentMap.get(p.id)
-          const tch = teacherMap.get(p.id)
-          const email = (p as any).email || st?.email || tch?.email || ''
-          const isAdmin = isPlatformAdminEmail(email)
-          const userRole = (isAdmin ? 'admin' : (p.role || 'student')) as Role
-          const phone = (p as any).phone_number || st?.phone || tch?.phone || ''
-          const dept = isAdmin ? 'Executive Administration' : (p.organization || st?.track || tch?.specialty || (userRole === 'student' ? 'Student Body' : 'Staff'))
-
-          return {
-            id: p.id,
-            fullName: p.full_name || (isAdmin ? 'Ijesha Digital Hub Admin' : 'Unnamed User'),
-            email: email,
-            role: userRole,
-            status: (isAdmin ? 'active' : (p.approval_status === 'rejected' ? 'suspended' : 'active')) as 'active' | 'suspended',
-            accountType: userRole === 'student' ? 'External Beneficiary' : 'Internal Staff',
-            phone: phone,
-            department: dept,
-            lastLogin: 'Active user',
-            createdAt: new Date(p.created_at || Date.now()).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            }),
-            permissionsCount: userRole === 'admin' ? 12 : userRole === 'manager' ? 8 : userRole === 'trainer' ? 6 : 4,
-            recentActivity: [
-              {
-                action: 'Account Registered',
-                timestamp: new Date(p.created_at || Date.now()).toLocaleDateString(),
-                details: `Registered with ${ROLE_LABELS[userRole] || userRole} role.`,
-              },
-            ],
-          }
-        })
-
-        const applicationPayload = applicationAccountsRes.ok
-          ? await applicationAccountsRes.json() as { users?: ApplicationAccount[] }
-          : { users: [] }
-        const applicationEmails = new Set(mapped.map((item) => item.email.toLowerCase()).filter(Boolean))
-        for (const account of applicationPayload.users ?? []) {
-          if (applicationEmails.has(account.email.toLowerCase())) continue
-          mapped.unshift({
-            id: account.id,
-            fullName: account.full_name,
-            email: account.email,
-            role: account.role,
-            status: account.approval_status === 'rejected' ? 'suspended' : 'active',
-            accountType: account.role === 'student' ? 'External Beneficiary' : 'Internal Staff',
-            phone: '',
-            department: account.track || (account.role === 'student' ? 'Student Body' : 'Administration'),
-            lastLogin: account.approval_status === 'pending' ? 'Awaiting approval' : 'Application account',
-            createdAt: new Date(account.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-            permissionsCount: account.role === 'admin' ? 12 : account.role === 'manager' ? 8 : account.role === 'trainer' ? 6 : 4,
-            recentActivity: [{
-              action: account.approval_status === 'pending' ? 'Account Registration Pending' : 'Application Account Created',
-              timestamp: new Date(account.created_at).toLocaleDateString(),
-              details: account.approval_status === 'pending' ? 'Awaiting administrator approval.' : `Registered with ${ROLE_LABELS[account.role]} role.`,
-            }],
-          })
-          applicationEmails.add(account.email.toLowerCase())
-        }
-
-        // Also append any roster students that do not yet have a profile row
-        const profileIds = new Set(profiles.map(p => p.id))
-        const profileEmails = new Set(mapped.map(m => m.email.toLowerCase()).filter(Boolean))
-
-        students.forEach((st) => {
-          if (st.email && isPlatformAdminEmail(st.email)) return
-          if (st.profile_id && profileIds.has(st.profile_id)) return
-          if (st.email && profileEmails.has(st.email.toLowerCase())) return
-          if (!st.full_name) return
-          mapped.push({
-            id: st.id,
-            fullName: st.full_name,
-            email: st.email || '',
-            role: 'student',
-            status: st.status === 'paused' || st.status === 'withdrawn' ? 'suspended' : 'active',
-            accountType: 'External Beneficiary',
-            phone: st.phone || '',
-            department: st.track || 'Student Body',
-            lastLogin: 'Never',
-            createdAt: new Date(st.created_at || Date.now()).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            }),
-            permissionsCount: 4,
-            recentActivity: [
-              {
-                action: 'Enrolled in Roster',
-                timestamp: new Date(st.created_at || Date.now()).toLocaleDateString(),
-                details: `Added to ${st.track || 'training track'} roster.`,
-              },
-            ],
-          })
-          if (st.email) profileEmails.add(st.email.toLowerCase())
-        })
-
-        // Also check any locally cached signups (e.g. recent student signups)
-        try {
-          const raw = localStorage.getItem('ijesha_hub_pending_roster_sync')
-          if (raw) {
-            const pendingList = JSON.parse(raw) as any[]
-            for (const item of pendingList) {
-              if (item.email && isPlatformAdminEmail(item.email)) continue
-              if (!profileIds.has(item.id) && !profileEmails.has(item.email?.toLowerCase())) {
-                mapped.unshift({
-                  id: item.id,
-                  fullName: item.full_name,
-                  email: item.email || '',
-                  role: 'student',
-                  status: 'active',
-                  accountType: 'External Beneficiary',
-                  phone: '',
-                  department: item.track || 'Frontend Development',
-                  lastLogin: 'Active user',
-                  createdAt: new Date().toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  }),
-                  permissionsCount: 4,
-                  recentActivity: [
-                    {
-                      action: 'Account Registered',
-                      timestamp: new Date().toLocaleDateString(),
-                      details: 'Signed up as student.',
-                    },
-                  ],
-                })
-                profileIds.add(item.id)
-                if (item.email) profileEmails.add(item.email.toLowerCase())
-              }
-            }
-          }
-        } catch {
-          // Ignore
-        }
-
-        if (mapped.length > 0) {
-          setUsers(mapped)
-          saveStoredUsers(mapped)
-        }
-      } catch (err) {
-        console.warn('Could not load profiles:', err)
-      }
-    }
-
-    loadAllDatabaseUsers()
-  }, [])
+  // Login accounts are authoritative; roster history is not an active login.
 
   // Switch tab and sync search params
   const handleSelectTab = (tab: 'verifications' | 'directory') => {

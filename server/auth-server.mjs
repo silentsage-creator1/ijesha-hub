@@ -2,6 +2,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import { createServer } from 'node:http'
 import { createClient } from '@supabase/supabase-js'
 import { validateSession } from './session-validation.mjs'
+import { studentRoleRoster } from './student-roster.mjs'
 import { profileCertificates } from './profile-certificates.mjs'
 
 const port = Number(process.env.PORT ?? process.env.APP_API_PORT ?? 3001)
@@ -370,7 +371,9 @@ createServer(async (request, response) => {
       }
       const result=await query
       if(result.error) throw result.error
-      return json(response,200,{students:result.data},cors)
+      const accounts = await db.from('app_auth_users').select('id,student_id,email,role')
+      if (accounts.error) throw accounts.error
+      return json(response,200,{students:studentRoleRoster(result.data ?? [], accounts.data ?? [])},cors)
     }
     const studentDetailMatch = request.url?.match(/^\/api\/students\/([0-9a-f-]{36})$/i)
     if (studentDetailMatch && request.method === 'GET') {

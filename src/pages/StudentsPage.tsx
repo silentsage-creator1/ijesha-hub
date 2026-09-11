@@ -79,7 +79,13 @@ export function StudentsPage() {
     load()
     const handleUpdate = () => load()
     window.addEventListener('cohorts-updated', handleUpdate)
-    return () => window.removeEventListener('cohorts-updated', handleUpdate)
+    window.addEventListener('focus', handleUpdate)
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void load() }, 30_000)
+    return () => {
+      window.removeEventListener('cohorts-updated', handleUpdate)
+      window.removeEventListener('focus', handleUpdate)
+      window.clearInterval(timer)
+    }
   }, [])
  const visible=useMemo(()=>students.filter(student=>{const q=query.toLowerCase();return (!q||searchText(student.full_name).includes(q)||searchText(student.email).includes(q)||searchText(student.cohort).includes(q))&&(!statusFilter||student.status===statusFilter)&&(!courseFilter||student.track===courseFilter)}),[students,query,statusFilter,courseFilter]);
   const available = cohorts.filter(c=>c.app_course_id===form.courseId && (!form.pastStudent || (c.ends_on && c.ends_on<new Date().toISOString().slice(0,10))))
