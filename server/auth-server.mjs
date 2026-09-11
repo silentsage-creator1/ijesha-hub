@@ -385,6 +385,15 @@ createServer(async (request, response) => {
       const cohort = await db.from('cohorts').select('id,app_course_id,ends_on').eq('id', input.cohortId).single()
       if (cohort.error) throw cohort.error
       if (!cohort.data.app_course_id || (cohort.data.ends_on && cohort.data.ends_on < new Date().toISOString().slice(0,10))) throw new Error('Choose a current or upcoming cohort linked to a course.')
+      const selectedStudents = await db.from('students').select('id,track').in('id', ids)
+      const course = await db.from('app_courses').select('title').eq('id',cohort.data.app_course_id).single()
+      if (selectedStudents.error) throw selectedStudents.error
+      if (course.error) throw course.error
+      const trackKey = value => {
+        const key = typeof value === 'string' ? value.toLowerCase().replace(/[^a-z0-9]/g,'') : ''
+        return ['frontenddevelopment','backenddevelopment','softwaredevelopment'].includes(key) ? 'softwaredevelopment' : key
+      }
+      if (selectedStudents.data.length !== ids.length || selectedStudents.data.some(student => !trackKey(student.track) || trackKey(student.track) !== trackKey(course.data.title))) throw new Error('Choose a cohort matching every selected student’s existing course or track.')
       const accounts = await db.from('app_auth_users').select('id,student_id,role,approval_status').in('student_id', ids)
       if (accounts.error) throw accounts.error
       const results = []
