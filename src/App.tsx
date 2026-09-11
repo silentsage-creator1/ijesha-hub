@@ -10,7 +10,13 @@ import { supabaseConfigured } from '@/lib/supabase'
 import { RlsRecursionBanner } from '@/components/common/RlsRecursionBanner'
 
 function Gate() {
-  const { session, profile, loading, error, signOut } = useAuth()
+  const { session, profile, loading, error, refreshProfile } = useAuth()
+  const [retrying, setRetrying] = useState(false)
+  const retry = async () => {
+    if (retrying) return
+    setRetrying(true)
+    try { await refreshProfile() } finally { setRetrying(false) }
+  }
 
   if (loading) {
     return (
@@ -20,10 +26,9 @@ function Gate() {
     )
   }
 
-  if (!session) return <LoginPage />
-
-  // A failed profile query must not leave a signed-in person on a perpetual spinner.
-  if (error) {
+  // A failed initial lookup is not proof that the session has expired.
+  // Do not expose the workspace until an account has been verified.
+  if (error && (!session || !profile)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--color-paper)] p-4">
         <div className="max-w-md rounded-[var(--radius-lg)] border border-[var(--color-danger-100)] bg-white p-6 text-center shadow-[var(--shadow-card)]">
@@ -31,15 +36,18 @@ function Gate() {
           <p className="mt-2 text-sm text-[var(--color-ink-500)]">{error}</p>
           <button
             type="button"
-            onClick={() => signOut()}
+            onClick={() => void retry()}
+            disabled={retrying}
             className="mt-5 rounded-[var(--radius-md)] border border-[var(--color-line)] px-3.5 py-2 text-sm font-medium text-[var(--color-ink-700)] hover:bg-[var(--color-ink-50)]"
           >
-            Return to Sign In
+            {retrying ? 'Retrying…' : 'Retry connection'}
           </button>
         </div>
       </div>
     )
   }
+
+  if (!session) return <LoginPage />
 
   // Signed in but the profile row hasn't loaded (or the trigger hasn't run yet) — treat as loading.
   if (!profile) {
@@ -50,7 +58,19 @@ function Gate() {
     )
   }
 
-  return <AppRoutes />
+  // Keep the same route tree mounted so a temporary outage does not discard
+  // the current page or unsaved form inputs. API authorization still applies.
+  return <>
+    <div role="status" aria-live="polite">
+      {error && <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line)] bg-[var(--color-paper)] px-4 py-3 text-sm text-[var(--color-ink-700)]">
+        <span>Connection interrupted. We couldn’t refresh your session. Your workspace is still open; we’ll retry automatically.</span>
+        <button type="button" disabled={retrying} onClick={() => void retry()} className="rounded-[var(--radius-md)] border border-[var(--color-line)] px-3 py-1.5 font-semibold disabled:opacity-60">
+          {retrying ? 'Retrying…' : 'Retry connection'}
+        </button>
+      </div>}
+    </div>
+    <AppRoutes />
+  </>
 }
 
 export default function App() {
