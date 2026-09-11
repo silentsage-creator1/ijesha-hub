@@ -59,9 +59,7 @@ export function LoginPage() {
     setSubmitting(false)
     setPassword('')
     setNotice(
-      result.user?.role === 'admin'
-        ? `Administrator account created for ${email.trim()}. You can now sign in.`
-        : `Registration received for ${email.trim()}. An administrator will review and activate your account in the app.`,
+      `Registration received for ${email.trim()}. An administrator will review and activate your account in the app. You cannot sign in until approved.`,
     )
     setMode('signin')
   }

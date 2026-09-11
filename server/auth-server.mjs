@@ -7,7 +7,6 @@ import { profileCertificates } from './profile-certificates.mjs'
 const port = Number(process.env.PORT ?? process.env.APP_API_PORT ?? 3001)
 const databaseUrl = process.env.SUPABASE_URL
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-const adminEmail = (process.env.APP_ADMIN_EMAIL ?? '').trim().toLowerCase()
 const publicUrl = (process.env.APP_PUBLIC_URL ?? process.env.APP_ORIGIN ?? `http://localhost:${port}`).replace(/\/$/, '')
 
 if (!databaseUrl || !serviceRoleKey) {
@@ -232,13 +231,15 @@ createServer(async (request, response) => {
       if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Enter a valid email address.')
       if (!fullName) throw new Error('Enter your full name.')
       if (password.length < 8) throw new Error('Password must be at least 8 characters.')
-      const { data: existing } = await db.from('app_auth_users').select('id').eq('email', email).maybeSingle()
+      const { data: existing, error: lookupError } = await db.from('app_auth_users').select('id').eq('email', email).maybeSingle()
+      if (lookupError) throw lookupError
       if (existing) return json(response, 409, { error: 'An account already exists for this email.' }, cors)
-      const role = email === adminEmail ? 'admin' : 'student'
-      const approvalStatus = role === 'admin' ? 'approved' : 'pending'
+      // Public registration must never grant privileged roles or bypass approval.
+      const role = 'student'
+      const approvalStatus = 'pending'
       const { data: account, error } = await db.from('app_auth_users').insert({ email, full_name: fullName, password_hash: passwordHash(password), role, track, approval_status: approvalStatus, organization: 'Ijesha Digital Hub' }).select('*').single()
       if (error) throw error
-      return json(response, 201, { user: publicUser(account), message: role === 'admin' ? 'Account created.' : 'Registration received. An administrator will review your account in the app.' }, cors)
+      return json(response, 201, { user: publicUser(account), message: 'Registration received. An administrator will review your account in the app.' }, cors)
     }
 
     if (request.method === 'POST' && request.url === '/api/auth/signin') {
@@ -247,14 +248,13 @@ createServer(async (request, response) => {
       const password = String(input.password ?? '')
       const { data: account } = await db.from('app_auth_users').select('*').eq('email', email).maybeSingle()
       if (!account) {
-        const message = email === adminEmail
-          ? 'The administrator application account has not been created yet. Select Create account and register this email first.'
-          : 'Invalid email or password.'
+        const message = 'Invalid email or password.'
         return json(response, 401, { error: message }, cors)
       }
       if (!passwordMatches(password, account.password_hash)) return json(response, 401, { error: 'Invalid email or password.' }, cors)
       if (account.approval_status === 'pending') return json(response, 403, { error: 'Your registration is awaiting in-app administrator approval.' }, cors)
       if (account.approval_status === 'rejected') return json(response, 403, { error: 'This account has not been approved.' }, cors)
+      if (account.approval_status !== 'approved') return json(response, 403, { error: 'Administrator approval is required before signing in.' }, cors)
       const token = randomBytes(32).toString('base64url')
       const expiresAt = new Date(Date.now() + sessionLifetimeMs).toISOString()
       const { error } = await db.from('app_auth_sessions').insert({ user_id: account.id, token_hash: sessionDigest(token), expires_at: expiresAt })
@@ -813,6 +813,21 @@ createServer(async (request, response) => {
       return json(response, 200, { user: publicUser(data) }, cors)
     }
 
+    const deleteAccountMatch = request.url?.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})$/i)
+    if (request.method === 'DELETE' && deleteAccountMatch) {
+      const actor = await currentUser(request)
+      if (!actor || actor.role !== 'admin') return json(response, 403, { error: 'Administrator access is required.' }, cors)
+      if (actor.id === deleteAccountMatch[1]) return json(response, 409, { error: 'You cannot delete your own account.' }, cors)
+      const target = await db.from('app_auth_users').select('id,role').eq('id', deleteAccountMatch[1]).maybeSingle()
+      if (target.error) throw target.error
+      if (!target.data) return json(response, 404, { error: 'Application account not found. No account was deleted.' }, cors)
+      if (target.data.role === 'admin') return json(response, 409, { error: 'Change this administrator to a non-administrator role before deleting the account.' }, cors)
+      // Account deletion cascades to sessions and reset tokens, not student history.
+      const result = await db.from('app_auth_users').delete().eq('id', target.data.id).select('id')
+      if (result.error?.code === '23503') return json(response, 409, { error: 'This account owns learning records and could not be deleted. Reject its access first, then review its linked records.' }, cors)
+      if (result.error) throw result.error
+      return json(response, 200, { success: true }, cors)
+    }
     const roleMatch = request.url?.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})\/role$/i)
     if (request.method === 'PATCH' && roleMatch) {
       const actor = await currentUser(request)

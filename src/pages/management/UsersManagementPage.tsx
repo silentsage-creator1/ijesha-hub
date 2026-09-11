@@ -28,7 +28,6 @@ import {
   clearStoredUsers,
   deleteStoredUser,
   deletePendingStudentVerification,
-  purgeUserByEmailOrName,
   getPendingStudentVerifications,
   setStudentVerificationStatus,
   approveAllPendingStudents,
@@ -107,6 +106,12 @@ export function UsersManagementPage() {
   }, [])
 
   useEffect(() => { void loadApplicationAccounts() }, [loadApplicationAccounts])
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') void loadApplicationAccounts() }
+    const timer = window.setInterval(refresh, 30_000)
+    window.addEventListener('focus', refresh)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh) }
+  }, [loadApplicationAccounts])
 
   const applicationVerifications: PendingStudentVerification[] = applicationAccounts
     .filter((account) => account.role === 'student')
@@ -408,17 +413,23 @@ export function UsersManagementPage() {
 
   // Delete individual user
   const handleDeleteSingleUser = async (targetUser: ManagedUser) => {
-    deleteStoredUser(targetUser.id)
-    deletePendingStudentVerification(targetUser.email)
-    await purgeUserByEmailOrName({
-      email: targetUser.email,
-      name: targetUser.fullName,
-      adminName: profile?.full_name || user?.name || 'Administrator',
-    })
-    setUsers(getStoredUsers())
-    setPendingVerifications(getPendingStudentVerifications())
-    setSelectedUserId(null)
-    showToast(`User account ${targetUser.fullName} (${targetUser.email}) has been deleted.`, 'success')
+    if (!window.confirm(`Delete login access for ${targetUser.email}? Existing sessions will stop working. Student learning records will be preserved.`)) return
+    try {
+      const account = applicationAccounts.find(item => item.id === targetUser.id || item.email.trim().toLowerCase() === targetUser.email.trim().toLowerCase())
+      if (!account) throw new Error('No matching application account was found. This legacy directory entry cannot be used to delete login access.')
+      const response = await fetch(apiUrl(`/api/admin/accounts/${account.id}`), { method: 'DELETE', credentials: 'include' })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Unable to delete account.')
+      deleteStoredUser(targetUser.id)
+      deletePendingStudentVerification(targetUser.email)
+      setUsers(current => current.filter(item => item.id !== targetUser.id && item.email.toLowerCase() !== account.email.toLowerCase()))
+      setApplicationAccounts(current => current.filter(item => item.id !== account.id))
+      setPendingVerifications(getPendingStudentVerifications())
+      setSelectedUserId(null)
+      showToast(`Login access for ${targetUser.fullName} has been deleted.`, 'success')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to delete account.', 'error')
+    }
   }
 
   // Bulk approve all pending
