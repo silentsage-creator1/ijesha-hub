@@ -1046,6 +1046,7 @@ export function UsersManagementPage() {
 
       {activeTab === 'verifications' ? (
         <StudentVerificationQueue
+          canReview={canManage}
           verifications={verificationQueue}
           onApprove={handleApproveStudent}
           onReject={handleRejectStudent}

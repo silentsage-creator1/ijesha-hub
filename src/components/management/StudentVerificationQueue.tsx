@@ -22,6 +22,7 @@ interface StudentVerificationQueueProps {
   onReject: (item: PendingStudentVerification) => void
   onApproveAll: () => void
   onDelete?: (item: PendingStudentVerification) => void
+  canReview?: boolean
 }
 
 export function StudentVerificationQueue({
@@ -30,6 +31,7 @@ export function StudentVerificationQueue({
   onReject,
   onApproveAll,
   onDelete,
+  canReview = false,
 }: StudentVerificationQueueProps) {
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending')
   const [search, setSearch] = useState('')
@@ -77,14 +79,14 @@ export function StudentVerificationQueue({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {pendingCount > 0 && (
+            {canReview && pendingCount > 0 && (
               <button
                 type="button"
                 onClick={onApproveAll}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors"
               >
                 <CheckCircle2 size={14} />
-                <span>Confirm All in App ({pendingCount})</span>
+                <span>Approve All Pending ({pendingCount})</span>
               </button>
             )}
           </div>
@@ -152,7 +154,7 @@ export function StudentVerificationQueue({
           />
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={() => setFilter('pending')}
@@ -196,7 +198,6 @@ export function StudentVerificationQueue({
             <thead className="bg-[var(--color-paper)] text-[var(--color-ink-600)] border-b border-[var(--color-line)] uppercase font-semibold">
               <tr>
                 <th className="px-5 py-3">Prospective Student</th>
-                <th className="px-4 py-3">Intended Track</th>
                 <th className="px-4 py-3">Registration Date</th>
                 <th className="px-4 py-3 text-center">Verification Status</th>
                 <th className="px-5 py-3 text-right">Verification Actions</th>
@@ -205,7 +206,7 @@ export function StudentVerificationQueue({
             <tbody className="divide-y divide-[var(--color-line)]">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-[var(--color-ink-400)]">
+                  <td colSpan={4} className="px-6 py-12 text-center text-[var(--color-ink-400)]">
                     <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-600">
                       <CheckCircle2 size={24} />
                     </div>
@@ -216,7 +217,7 @@ export function StudentVerificationQueue({
                     </p>
                     <p className="text-xs text-[var(--color-ink-500)] mt-1 max-w-md mx-auto">
                       {filter === 'pending'
-                        ? 'All registered student accounts have been verified. When new students register on the platform, their records are synchronized automatically.'
+                        ? 'New registrations appear here with Approve and Reject actions for administrators. There are no pending requests matching this view.'
                         : 'Try adjusting your search criteria or switch status filters.'}
                     </p>
                   </td>
@@ -249,10 +250,6 @@ export function StudentVerificationQueue({
                       </div>
                     </td>
 
-                    <td className="px-4 py-3.5 text-[var(--color-ink-700)] font-medium">
-                      {item.track || 'General Curriculum'}
-                    </td>
-
                     <td className="px-4 py-3.5 text-[var(--color-ink-500)]">
                       <div className="flex items-center gap-1">
                         <Calendar size={12} className="text-[var(--color-ink-400)]" />
@@ -278,7 +275,7 @@ export function StudentVerificationQueue({
 
                     <td className="px-5 py-3.5 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {item.status === 'pending' ? (
+                        {item.status === 'pending' && canReview ? (
                           <>
                             <button
                               type="button"
@@ -286,7 +283,7 @@ export function StudentVerificationQueue({
                               className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors"
                             >
                               <Check size={13} />
-                              <span>Confirm in App</span>
+                              <span>Approve</span>
                             </button>
                             <button
                               type="button"
@@ -297,6 +294,8 @@ export function StudentVerificationQueue({
                               <span>Reject</span>
                             </button>
                           </>
+                        ) : item.status === 'pending' ? (
+                          <span className="text-xs text-[var(--color-ink-500)]">Awaiting administrator review</span>
                         ) : item.status === 'approved' ? (
                           <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
                             <UserCheck size={14} />
