@@ -17,8 +17,9 @@ interface AuthContextValue {
   signOut: () => Promise<void>; refreshProfile: () => Promise<void>
 }
 const AuthContext = createContext<AuthContextValue | null>(null)
-const apiBaseUrl = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
-export const apiUrl = (path: string) => `${apiBaseUrl}${path}`
+// Both Vercel and the local Vite server proxy /api to the backend.
+// Keep login cookies first-party even if an old VITE_API_URL is configured.
+export const apiUrl = (path: string) => path
 
 export function isPlatformAdminEmail(email?: string | null) {
   return email?.trim().toLowerCase() === 'info@ijeshadigitalhub.com'
@@ -83,7 +84,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshProfile])
   const value = useMemo<AuthContextValue>(() => ({
     session, profile, user: profile ? { name: profile.full_name, role: profile.role, initials: initialsFor(profile.full_name), org: profile.organization ?? undefined, photoPath: profile.photo_path ?? undefined } : null, role: profile?.role ?? null, loading, error,
-    async signIn(email, password) { try { const { user: account } = await request<{ user: AppUser }>('/api/auth/signin', { method: 'POST', body: JSON.stringify({ email, password }) }); ++authRevision.current; setLoading(false); const next = toState(account); setSession(next.session); setProfile(next.profile); setError(null); return { error: null } } catch (err) { const message = err instanceof Error ? err.message : 'Unable to sign in.'; setError(message); return { error: message } } },
+    async signIn(email, password) {
+      ++authRevision.current
+      try {
+        const signedIn = await request<{ user: AppUser }>('/api/auth/signin', { method: 'POST', body: JSON.stringify({ email, password }) })
+        // A successful password check does not prove that the browser saved the cookie.
+        let verified: { user: AppUser }
+        try { verified = await request<{ user: AppUser }>('/api/auth/me') }
+        catch (err) {
+          if (err instanceof AuthRequestError && err.status === 401) throw new Error('Your browser could not keep the login session. Allow cookies for this site and try again.')
+          throw err
+        }
+        if (!verified.user || verified.user.id !== signedIn.user.id) throw new Error('Unable to confirm your login session. Please try again.')
+        ++authRevision.current; setLoading(false)
+        const next = toState(verified.user); setSession(next.session); setProfile(next.profile); setError(null)
+        return { error: null }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to sign in.'
+        setError(message); return { error: message }
+      }
+    },
     async quickSignIn() { return { error: 'Demo sign-in is no longer available. Please use an application account.' } },
     async signUp(email, password, fullName, track) { try { const result = await request<{ user: AppUser }>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, fullName, track }) }); setError(null); return { error: null, user: result.user } } catch (err) { const message = err instanceof Error ? err.message : 'Unable to create your account.'; setError(message); return { error: message } } },
     async resetPassword(email) { try { const result = await request<{ developmentResetUrl?: string }>('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }); return { error: null, developmentResetUrl: result.developmentResetUrl } } catch (err) { return { error: err instanceof Error ? err.message : 'Unable to request a reset link.' } } },

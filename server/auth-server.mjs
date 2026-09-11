@@ -44,7 +44,7 @@ if (serviceRoleValidationError) {
 }
 
 function json(response, status, body, headers = {}) {
-  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', ...headers })
+  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store', ...headers })
   response.end(JSON.stringify(body))
 }
 
@@ -150,7 +150,7 @@ async function canTeachCohort(account, cohortId) {
   return course.data.trainer_id === account.id
 }
 function setSessionCookie(response, token) {
-  const crossSite = process.env.NODE_ENV === 'production' ? '; SameSite=None; Secure' : '; SameSite=Strict'
+  const crossSite = process.env.NODE_ENV === 'production' ? '; SameSite=Lax; Secure' : '; SameSite=Strict'
   return `${cookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly${crossSite}; Max-Age=${sessionLifetimeMs / 1000}`
 }
 
@@ -266,7 +266,7 @@ createServer(async (request, response) => {
     if (request.method === 'POST' && request.url === '/api/auth/signout') {
       const token = parseCookies(request)[cookieName]
       if (token) await db.from('app_auth_sessions').delete().eq('token_hash', sessionDigest(token))
-      const crossSite = process.env.NODE_ENV === 'production' ? '; SameSite=None; Secure' : '; SameSite=Strict'
+      const crossSite = process.env.NODE_ENV === 'production' ? '; SameSite=Lax; Secure' : '; SameSite=Strict'
       return json(response, 204, {}, { ...cors, 'set-cookie': `${cookieName}=; Path=/; HttpOnly${crossSite}; Max-Age=0` })
     }
 
