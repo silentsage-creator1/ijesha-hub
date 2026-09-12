@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from 'react'
 import {
-  GraduationCap,
   Loader2,
   AlertCircle,
   ShieldCheck,
@@ -69,9 +68,7 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-[var(--color-paper)] px-4">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
-          <span className="flex h-11 w-11 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-ember-500)] text-white">
-            <GraduationCap size={22} />
-          </span>
+          <img src="/ijesha-logo.jpeg" alt="Ijesha Digital Hub logo" className="h-24 w-24 rounded-full object-contain" />
 
           <h1 className="mt-3 font-display text-xl font-semibold text-[var(--color-ink-900)]">
             IJESHA DIGITAL HUB

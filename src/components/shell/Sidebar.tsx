@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { GraduationCap, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { navigationForRole } from '@/data/navigation'
 import { useAuth } from '@/app/auth'
 import { ICONS } from '@/lib/icons'
@@ -32,9 +32,7 @@ export function Sidebar({ onNavigate, onClose }: { onNavigate?: () => void; onCl
     <div className="flex h-full w-full flex-col bg-[var(--color-ink-900)] text-[var(--color-ink-100)]">
       <div className="flex items-center justify-between px-5 py-5">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-ember-500)] text-white">
-            <GraduationCap size={18} />
-          </span>
+          <img src="/ijesha-logo.jpeg" alt="Ijesha Digital Hub logo" className="h-12 w-12 shrink-0 rounded-full object-contain" />
           <div className="leading-tight">
             <p className="font-display text-sm font-semibold text-white">IJESHA DIGITAL HUB</p>
             <p className="text-[11px] text-[var(--color-ink-400)]">Digital Training Platform</p>
