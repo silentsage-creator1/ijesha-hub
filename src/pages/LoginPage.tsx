@@ -159,7 +159,7 @@ export function LoginPage() {
                 }
               />
             </Field>}
-            {mode === 'signin' && <button type="button" onClick={() => { setMode('forgot'); setError(null); setNotice(null) }} className="-mt-1 text-xs font-semibold text-[var(--color-harbor-700)]">Forgot password?</button>}
+            {mode === 'signin' && <a href="/forgot-password" className="-mt-1 inline-block text-xs font-semibold text-[var(--color-harbor-700)]">Forgot password?</a>}
 
             {error && (
               <div className="rounded-[var(--radius-md)] border border-[var(--color-danger-200)] bg-[var(--color-danger-50)] p-3.5 text-xs text-[var(--color-danger-700)]">

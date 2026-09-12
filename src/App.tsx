@@ -6,6 +6,7 @@ import { AppRoutes } from '@/app/routes'
 import { LoginPage } from '@/pages/LoginPage'
 import { SupabaseNotConfigured } from '@/pages/SupabaseNotConfigured'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
+import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { supabaseConfigured } from '@/lib/supabase'
 import { RlsRecursionBanner } from '@/components/common/RlsRecursionBanner'
 
@@ -79,7 +80,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        {window.location.pathname === '/reset-password' ? (
+        {window.location.pathname === '/forgot-password' ? <ForgotPasswordPage /> : window.location.pathname === '/reset-password' ? (
           <ResetPasswordPage />
         ) : showSetupGuide ? (
           <SupabaseNotConfigured onDismiss={() => setShowSetupGuide(false)} />
