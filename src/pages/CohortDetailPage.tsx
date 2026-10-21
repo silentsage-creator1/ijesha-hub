@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, BookOpen, CalendarDays, ClipboardCheck, Loader2, Plus, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, BookOpen, CalendarDays, ClipboardCheck, Loader2, Pencil, Plus, Trash2, Users } from 'lucide-react'
 import { Badge, Card, ProgressRing, SectionHeading } from '@/components/ui/primitives'
 import { Modal } from '@/components/ui/Modal'
 import { useAuth } from '@/app/auth'
@@ -320,6 +320,16 @@ export function CohortDetailPage() {
                         </p>
                       </Link>
                       <Badge tone={isPast(s.status) || s.status==='unknown' ? 'neutral' : 'success'}>{labelStatus(s.status)}</Badge>
+                      {tab === 'students' && cohort.status === 'Completed' && canManage && (
+                        <Link
+                          to={`/students/${s.id}?edit=1`}
+                          state={{ from: `/cohorts/${id}` }}
+                          aria-label={`Edit details for ${s.full_name}`}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-[var(--radius-md)] border border-[var(--color-line)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-ink-700)] hover:bg-[var(--color-ink-50)]"
+                        >
+                          <Pencil size={13} /> Edit details
+                        </Link>
+                      )}
                     </li>
                   ))
                 ) : (

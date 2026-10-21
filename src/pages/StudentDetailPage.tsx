@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Pencil, Trash2, Mail, Layers, BookOpen, Construction, TrendingUp, CheckCircle2, FileText, ExternalLink } from 'lucide-react'
 import { Card, Badge, Avatar, SectionHeading } from '@/components/ui/primitives'
 import { Modal } from '@/components/ui/Modal'
@@ -42,8 +42,11 @@ interface FormState {
 export function StudentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { role } = useAuth()
   const canManage = role === 'admin' || role === 'manager'
+  const returnTo = (location.state as { from?: string } | null)?.from || '/students'
 
   const [student, setStudent] = useState<Student | null>(null)
   const [details, setDetails] = useState<Record<string, string | number | null> | null>(null)
@@ -93,6 +96,14 @@ export function StudentDetailPage() {
     setFormError(null)
     setModalOpen(true)
   }
+
+  useEffect(() => {
+    if (!canManage || !student || searchParams.get('edit') !== '1') return
+    openEdit()
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('edit')
+    setSearchParams(nextParams, { replace: true })
+  }, [canManage, student, searchParams, setSearchParams])
 
   async function handleSave() {
     if (!student || !form) return
@@ -147,7 +158,7 @@ export function StudentDetailPage() {
   if (loadError || !student) {
     return (
       <div>
-        <BackLink />
+        <BackLink to={returnTo} />
         <Card className="px-5 py-8 text-center text-sm text-[var(--color-danger-600)]">
           {loadError ?? "This student wasn't found, or you don't have access to view them."}
         </Card>
@@ -157,7 +168,7 @@ export function StudentDetailPage() {
 
   return (
     <div>
-      <BackLink />
+      <BackLink to={returnTo} />
 
       <Card className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
@@ -313,9 +324,9 @@ export function StudentDetailPage() {
   )
 }
 
-function BackLink() {
+function BackLink({ to = '/students' }: { to?: string }) {
   return (
-    <Link to="/students" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-[var(--color-ink-500)] hover:text-[var(--color-ink-800)]">
+    <Link to={to} className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-[var(--color-ink-500)] hover:text-[var(--color-ink-800)]">
       <ArrowLeft size={15} />
       Back to Students
     </Link>
