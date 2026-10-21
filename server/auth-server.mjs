@@ -511,6 +511,24 @@ createServer(async (request, response) => {
       if(result.error) throw result.error
       return json(response,200,{message:'Student assigned to cohort successfully.'},cors)
     }
+    const studentCohortMatch = request.url?.match(/^\/api\/students\/([0-9a-f-]{36})\/cohort$/i)
+    if(studentCohortMatch && request.method === 'PATCH') {
+      const actor = await currentUser(request)
+      if(!actor || !['admin','manager'].includes(actor.role)) return json(response,403,{error:'Administrator or manager access is required.'},cors)
+      const input = await body(request)
+      if(!input.cohortId) throw new Error('Choose a cohort.')
+      const student = await db.from('students').select('id,email').eq('id',studentCohortMatch[1]).maybeSingle()
+      if(student.error) throw student.error
+      if(!student.data) return json(response,404,{error:'Student record not found.'},cors)
+      let accountQuery = db.from('app_auth_users').select('id').eq('role','student').eq('approval_status','approved')
+      accountQuery = student.data.email ? accountQuery.eq('email',student.data.email) : accountQuery.eq('student_id',student.data.id)
+      const account = await accountQuery.maybeSingle()
+      if(account.error) throw account.error
+      if(!account.data) throw new Error('This graduated student has no approved student account to assign.')
+      const result = await db.rpc('assign_app_student_cohort',{account_id:account.data.id,target_cohort_id:input.cohortId})
+      if(result.error) throw result.error
+      return json(response,200,{message:'Student assigned to cohort successfully.'},cors)
+    }
     const cohortStudentsMatch = request.url?.match(/^\/api\/cohorts\/([0-9a-f-]{36})\/students$/i)
     if (cohortStudentsMatch && ['GET','POST'].includes(request.method)) {
       const actor=await currentUser(request)
@@ -527,19 +545,12 @@ createServer(async (request, response) => {
         ])
         for(const result of [cohort,accounts]) if(result.error) throw result.error
         if(accounts.data.length!==ids.length) throw new Error('Only approved, active student accounts can be added.')
-        if(!cohort.data.app_course_id || (cohort.data.ends_on && cohort.data.ends_on<new Date().toISOString().slice(0,10))) throw new Error('Choose a current or upcoming cohort linked to a course.')
+        if(!cohort.data.app_course_id) throw new Error('Choose a cohort linked to a course.')
         const course=await db.from('app_courses').select('title').eq('id',cohort.data.app_course_id).single()
         if(course.error) throw course.error
-        const trackKey=value=>{
-          const key=typeof value==='string'?value.toLowerCase().replace(/[^a-z0-9]/g,''):''
-          return ['frontenddevelopment','backenddevelopment','softwaredevelopment'].includes(key)?'softwaredevelopment':key
-        }
-        const expected=trackKey(course.data.title)
         const results=[]
         for(const accountId of ids) {
           const account=accounts.data.find(item=>item.id===accountId)
-          const accountTrack=trackKey(account.track)
-          if(accountTrack && accountTrack!==expected) { results.push({studentId:accountId,error:'This student account is registered for a different course.'}); continue }
           const result=await db.rpc('assign_app_student_cohort',{account_id:account.id,target_cohort_id:cid})
           results.push({studentId:accountId,error:result.error?result.error.message:null})
         }
@@ -571,14 +582,8 @@ createServer(async (request, response) => {
         db.from('app_auth_users').select('id,student_id,email,full_name,track').eq('role','student').eq('approval_status','approved').neq('is_active',false).order('full_name'),
       ])
       for(const result of [course,students,enrollments,accounts]) if(result.error) throw result.error
-      const key=value=>{
-        const normalized=typeof value==='string'?value.toLowerCase().replace(/[^a-z0-9]/g,''):''
-        return ['frontenddevelopment','backenddevelopment','softwaredevelopment'].includes(normalized)?'softwaredevelopment':normalized
-      }
       const enrolled=new Set(enrollments.data.map(item=>item.student_id))
       const available=accounts.data.filter(account=>{
-        const accountTrack=key(account.track)
-        if(accountTrack && accountTrack!==key(course.data.title)) return false
         const linked=students.data.find(student=>student.id===account.student_id || (account.email && student.email?.toLowerCase()===account.email.toLowerCase()))
         return !linked || !enrolled.has(linked.id)
       }).map(account=>({id:account.id,full_name:account.full_name,email:account.email,track:account.track || null,status:'active'}))

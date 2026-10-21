@@ -6,18 +6,17 @@ import { Modal } from '@/components/ui/Modal'
 import { useAuth } from '@/app/auth'
 import { cohortRequest, deleteCohort, getAllCohorts, type Cohort } from '@/lib/cohorts'
 import { safeText, searchText } from '@/lib/text'
-import { cohortStudentStatus, isPastStudentStatus as isPast, studentStatusLabel as labelStatus } from '@/lib/cohortStudentStatus'
+import { cohortStudentStatus, studentStatusLabel as labelStatus } from '@/lib/cohortStudentStatus'
 
 type Student = { id: string; full_name: string; status: string; track: string | null }
 type Enrollment = { id: string; student_id: string; completion_status: string; students: Student | null }
 type Progress = { student_id: string; progress_percent: number }
 type Attendance = { student_id: string; status: string }
-type Tab = 'overview' | 'students' | 'past' | 'sessions' | 'attendance' | 'assignments' | 'assessments' | 'progress' | 'reports'
+type Tab = 'overview' | 'students' | 'sessions' | 'attendance' | 'assignments' | 'assessments' | 'progress' | 'reports'
 
 const tabs: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'students', label: 'Students' },
-  { id: 'past', label: 'Past Students' },
   { id: 'sessions', label: 'Training Sessions' },
   { id: 'attendance', label: 'Attendance' },
   { id: 'assignments', label: 'Assignments' },
@@ -117,8 +116,6 @@ export function CohortDetailPage() {
     return Array.from(map.values())
   }, [enrollments])
 
-  const current = allStudents.filter((s) => !isPast(s.status))
-  const past = allStudents.filter((s) => isPast(s.status))
   const pct = (sid: string) => progress.filter((p) => p.student_id === sid).at(-1)?.progress_percent ?? 0
   const attendancePct = (sid: string) => {
     const rows = attendance.filter((a) => a.student_id === sid)
@@ -127,13 +124,11 @@ export function CohortDetailPage() {
   const average = allStudents.length ? Math.round(allStudents.reduce((sum, s) => sum + pct(s.id), 0) / allStudents.length) : 0
 
   const shown = useMemo(() => {
-    const source = tab === 'past' ? past : current
-    return source.filter((s) => {
+    return allStudents.filter((s) => {
       const text = !query || searchText(s.full_name).includes(searchText(query))
-      const normalized = searchText(labelStatus(s.status))
-      return text && (filter === 'all' || normalized === filter)
+      return text && (filter === 'all' || s.status === filter)
     })
-  }, [tab, past, current, query, filter])
+  }, [allStudents, query, filter])
 
   if (!cohort) {
     return <Card className="p-6 text-sm text-[var(--color-ink-500)]">{error ?? 'Loading cohort…'}</Card>
@@ -141,9 +136,8 @@ export function CohortDetailPage() {
 
   const course = cohort.course_name || 'Course'
   const stat = (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <Mini label="Current students" value={String(current.length)} icon={Users} />
-      <Mini label="Past students" value={String(past.length)} icon={Users} />
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <Mini label="Students" value={String(allStudents.length)} icon={Users} />
       <Mini label="Attendance" value={`${allStudents.length ? Math.round(allStudents.reduce((s, x) => s + attendancePct(x.id), 0) / allStudents.length) : 0}%`} icon={ClipboardCheck} />
       <Mini label="Average progress" value={`${average}%`} icon={BookOpen} />
     </div>
@@ -272,18 +266,15 @@ export function CohortDetailPage() {
             <SectionHeading eyebrow="Cohort overview" title="Training performance" />
             {stat}
             <Card className="mt-5 p-5">
-              <SectionHeading title="Completion summary" />
-              <p className="text-sm text-[var(--color-ink-600)]">
-                {past.filter((s) => labelStatus(s.status) === 'Completed').length} completed, {past.filter((s) => labelStatus(s.status) === 'Inactive').length} inactive and{' '}
-                {past.filter((s) => s.status === 'withdrawn').length} withdrawn students remain available in Past Students.
-              </p>
+              <SectionHeading title="Cohort roster" />
+              <p className="text-sm text-[var(--color-ink-600)]">{allStudents.length} enrolled students, including completed enrollments.</p>
             </Card>
           </>
         )}
-        {(tab === 'students' || tab === 'past') && (
+        {tab === 'students' && (
           <>
             <div className="mb-4 flex items-center justify-between gap-3">
-              <SectionHeading eyebrow={tab === 'past' ? 'Historical learners' : 'Current learners'} title={tab === 'past' ? 'Past Students' : 'Students'} />
+              <SectionHeading eyebrow="Cohort roster" title="Students" />
               {tab === 'students' && ['admin','manager','trainer'].includes(role ?? '') && (
                 <button type="button" onClick={() => { setAddStudentMessage(''); setShowAddStudents(true) }} className="inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-harbor-500)] px-3.5 py-2 text-sm font-semibold text-white">
                   <Plus size={16} /> Add students
@@ -294,18 +285,11 @@ export function CohortDetailPage() {
               <input className="input max-w-xs" placeholder="Search students" value={query} onChange={(e) => setQuery(e.target.value)} />
               <select className="input max-w-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
                 <option value="all">All statuses</option>
-                {tab === 'past' ? (
-                  <>
-                    <option value="completed">Completed</option>
-                    <option value="withdrawn">Withdrawn</option>
-                    <option value="inactive">Inactive</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="active">Active</option>
-                    <option value="at risk">At Risk</option>
-                  </>
-                )}
+                <option value="new">New</option>
+                <option value="active">Active</option>
+                <option value="paused">Paused</option>
+                <option value="graduated">Completed</option>
+                <option value="withdrawn">Withdrawn</option>
               </select>
             </div>
             <Card className="overflow-hidden">
@@ -319,8 +303,8 @@ export function CohortDetailPage() {
                           {course} · Attendance {attendancePct(s.id)}% · Progress {pct(s.id)}%
                         </p>
                       </Link>
-                      <Badge tone={isPast(s.status) || s.status==='unknown' ? 'neutral' : 'success'}>{labelStatus(s.status)}</Badge>
-                      {tab === 'students' && cohort.status === 'Completed' && canManage && (
+                      <Badge tone={['graduated','withdrawn','paused','unknown'].includes(s.status) ? 'neutral' : 'success'}>{labelStatus(s.status)}</Badge>
+                      {cohort.status === 'Completed' && canManage && (
                         <Link
                           to={`/students/${s.id}?edit=1`}
                           state={{ from: `/cohorts/${id}` }}
