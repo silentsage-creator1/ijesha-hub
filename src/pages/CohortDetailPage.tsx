@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, BookOpen, CalendarDays, ClipboardCheck, Loader2, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, BookOpen, CalendarDays, ClipboardCheck, Loader2, Plus, Trash2, Users } from 'lucide-react'
 import { Badge, Card, ProgressRing, SectionHeading } from '@/components/ui/primitives'
 import { Modal } from '@/components/ui/Modal'
 import { useAuth } from '@/app/auth'
@@ -42,6 +42,11 @@ export function CohortDetailPage() {
   const [filter, setFilter] = useState('all')
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [showAddStudents, setShowAddStudents] = useState(false)
+  const [availableStudents, setAvailableStudents] = useState<{id:string;full_name:string;email:string|null;track:string|null}[]>([])
+  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([])
+  const [addingStudents, setAddingStudents] = useState(false)
+  const [addStudentMessage, setAddStudentMessage] = useState('')
 
   useEffect(() => {
     let cancel = false
@@ -67,6 +72,40 @@ export function CohortDetailPage() {
       cancel = true
     }
   }, [id])
+
+  useEffect(() => {
+    if (!showAddStudents) return
+    let cancelled = false
+    cohortRequest<{students:{id:string;full_name:string;email:string|null;track:string|null}[]}>(`/api/cohorts/${id}/available-students`)
+      .then(result => { if (!cancelled) { setAvailableStudents(result.students); setSelectedAccounts([]) } })
+      .catch(err => { if (!cancelled) setAddStudentMessage(err instanceof Error ? err.message : 'Unable to load student accounts.') })
+    return () => { cancelled = true }
+  }, [id, showAddStudents])
+
+  async function addStudentsToThisCohort() {
+    if (!selectedAccounts.length || addingStudents) return
+    setAddingStudents(true)
+    setAddStudentMessage('')
+    try {
+      const result = await cohortRequest<{results:{studentId:string;error:string|null}[]}>(`/api/cohorts/${id}/students`, {
+        method: 'POST', body: JSON.stringify({ accountIds: selectedAccounts }),
+      })
+      const failed = result.results.filter(item => item.error)
+      setAddStudentMessage(failed.length ? `${result.results.length-failed.length} added; ${failed.length} failed. ${failed.map(item=>item.error).join(' ')}` : `${result.results.length} student(s) added to ${cohort?.name ?? 'this cohort'}.`)
+      const refreshed = await cohortRequest<{enrollments:Enrollment[];attendance:Attendance[];progress:Progress[]}>(`/api/cohorts/${id}/students`)
+      setEnrollments(refreshed.enrollments)
+      setAttendance(refreshed.attendance)
+      setProgress(refreshed.progress)
+      const remaining = await cohortRequest<{students:{id:string;full_name:string;email:string|null;track:string|null}[]}>(`/api/cohorts/${id}/available-students`)
+      setAvailableStudents(remaining.students)
+      setSelectedAccounts(failed.map(item => item.studentId))
+      if (!failed.length) setShowAddStudents(false)
+    } catch (err) {
+      setAddStudentMessage(err instanceof Error ? err.message : 'Unable to add selected students.')
+    } finally {
+      setAddingStudents(false)
+    }
+  }
 
   // Classify historical students by this enrollment, not their current course status.
   const allStudents = useMemo(() => {
@@ -168,7 +207,7 @@ export function CohortDetailPage() {
                 Are you sure you want to remove &quot;{cohort.name}&quot;?
               </p>
               <p className="text-xs text-red-700 leading-relaxed">
-                This permanently removes the cohort and any related records configured for automatic deletion. Protected linked records may block removal. This action cannot be undone.
+                Permanently delete this cohort, its enrollments, sessions, learning work, submissions, grades and attendance. User accounts, student profiles and courses will be kept. Students lose access to this cohort. This cannot be undone through the app.
               </p>
               {allStudents.length > 0 && (
                 <p className="text-xs font-medium text-red-800">
@@ -243,7 +282,14 @@ export function CohortDetailPage() {
         )}
         {(tab === 'students' || tab === 'past') && (
           <>
-            <SectionHeading eyebrow={tab === 'past' ? 'Historical learners' : 'Current learners'} title={tab === 'past' ? 'Past Students' : 'Students'} />
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <SectionHeading eyebrow={tab === 'past' ? 'Historical learners' : 'Current learners'} title={tab === 'past' ? 'Past Students' : 'Students'} />
+              {tab === 'students' && ['admin','manager','trainer'].includes(role ?? '') && (
+                <button type="button" onClick={() => { setAddStudentMessage(''); setShowAddStudents(true) }} className="inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-harbor-500)] px-3.5 py-2 text-sm font-semibold text-white">
+                  <Plus size={16} /> Add students
+                </button>
+              )}
+            </div>
             <div className="mb-4 flex flex-wrap gap-3">
               <input className="input max-w-xs" placeholder="Search students" value={query} onChange={(e) => setQuery(e.target.value)} />
               <select className="input max-w-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
@@ -299,6 +345,23 @@ export function CohortDetailPage() {
         )}
         {tab === 'reports' && <CohortLink label="Reports" href="/reports" text="Review participation, attendance, assessment, progress and completion reports for students in this cohort." />}
       </div>
+      {showAddStudents && (
+        <Modal title={`Add students to ${cohort.name}`} onClose={() => !addingStudents && setShowAddStudents(false)}>
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--color-ink-600)]">Select approved student accounts to enroll in this cohort.</p>
+            <div className="max-h-80 overflow-y-auto rounded-md border border-[var(--color-line)]">
+              {availableStudents.length ? availableStudents.map(student => (
+                <label key={student.id} className="flex cursor-pointer items-center gap-3 border-b border-[var(--color-line)] p-3 text-sm last:border-0">
+                  <input type="checkbox" checked={selectedAccounts.includes(student.id)} onChange={event => setSelectedAccounts(current => event.target.checked ? [...current,student.id] : current.filter(accountId => accountId !== student.id))} />
+                  <span>{student.full_name}<span className="block text-xs text-[var(--color-ink-500)]">{student.email} · {student.track || 'Course will be set to this cohort'}</span></span>
+                </label>
+              )) : <p className="p-4 text-sm text-[var(--color-ink-500)]">No eligible student accounts are available for this cohort.</p>}
+            </div>
+            {addStudentMessage && <p role="status" className="text-sm text-[var(--color-ink-600)]">{addStudentMessage}</p>}
+            <div className="flex justify-end"><button type="button" disabled={addingStudents || !selectedAccounts.length} onClick={() => void addStudentsToThisCohort()} className="rounded-[var(--radius-md)] bg-[var(--color-harbor-500)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{addingStudents ? 'Adding…' : `Add selected (${selectedAccounts.length})`}</button></div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

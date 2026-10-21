@@ -25,6 +25,7 @@ import {
   logSystemActivity,
 } from '@/lib/management'
 import { apiUrl, useAuth } from '@/app/auth'
+import { getAllCohorts, type Cohort } from '@/lib/cohorts'
 
 export function TrainersManagementPage() {
   const { user, profile, role } = useAuth()
@@ -60,7 +61,11 @@ export function TrainersManagementPage() {
   })
 
   const [selectedCourseToAssign, setSelectedCourseToAssign] = useState('')
-  const [selectedCohortToAssign, setSelectedCohortToAssign] = useState('Cohort A')
+  const [selectedCohortToAssign, setSelectedCohortToAssign] = useState('')
+  const [selectedInitialCohort, setSelectedInitialCohort] = useState('Cohort A')
+  const [platformCohorts, setPlatformCohorts] = useState<Cohort[]>([])
+  const [cohortError, setCohortError] = useState('')
+  const [cohortsLoading, setCohortsLoading] = useState(true)
 
   useEffect(() => {
     let active = true
@@ -108,10 +113,17 @@ export function TrainersManagementPage() {
     }).catch(err=>setCourseError(err.message))
   },[])
   useEffect(()=>{
-    setTrainers(current=>current.map(t=>({...t,courses:courses.filter(c=>c.trainer_id===t.id).map(c=>c.title)})))
-  },[courses,trainers.length])
-  async function assignCourse(courseId:string,trainerId:string|null) {
-    if(!canManage||courseBusy)return
+    setTrainers(current=>current.map(trainer=>{
+      const assignedCourses=courses.filter(course=>course.trainer_id===trainer.id)
+      const assignedCourseIds=new Set(assignedCourses.map(course=>course.id))
+      return {...trainer,courses:assignedCourses.map(course=>course.title),cohorts:platformCohorts.filter(cohort=>cohort.trainer_id===trainer.id || (!cohort.trainer_id && cohort.app_course_id && assignedCourseIds.has(cohort.app_course_id))).map(cohort=>cohort.name)}
+    }))
+  },[courses,platformCohorts,trainers.length])
+  useEffect(() => {
+    getAllCohorts().then(setPlatformCohorts).catch(() => setCohortError('Unable to load created cohorts.')).finally(() => setCohortsLoading(false))
+  }, [])
+  async function assignCourse(courseId:string,trainerId:string|null): Promise<boolean> {
+    if(!canManage||courseBusy)return false
     setCourseBusy(true);setCourseError('')
     try{
       const response=await fetch(apiUrl('/api/courses/'+courseId),{method:'PATCH',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({trainerId})})
@@ -119,8 +131,10 @@ export function TrainersManagementPage() {
       if(!response.ok)throw new Error(payload.error||'Unable to change course assignment.')
       setCourses(current=>current.map(c=>c.id===courseId?payload.course:c))
       setIsAssignCourseModalOpen(false)
-    }catch(err){setCourseError(err instanceof Error?err.message:'Unable to update course.')}
+      return true
+    }catch(err){const message=err instanceof Error?err.message:'Unable to update course.';setCourseError(message);setCohortError(message)}
     finally{setCourseBusy(false)}
+    return false
   }
   // Selected trainer
   const selectedTrainer = useMemo(() => {
@@ -204,27 +218,25 @@ export function TrainersManagementPage() {
   }
 
   // Action: Assign Cohort
-  const handleAssignCohort = (e: React.FormEvent) => {
+  const handleAssignCohort = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedTrainer) return
-    if (!selectedTrainer.cohorts.includes(selectedCohortToAssign)) {
-      const newCohorts = [...selectedTrainer.cohorts, selectedCohortToAssign]
-      const updated = trainers.map((t) =>
-        t.id === selectedTrainer.id ? { ...t, cohorts: newCohorts } : t
-      )
-      setTrainers(updated)
-      saveStoredTrainers(updated)
-
-      logSystemActivity(
-        profile?.full_name || user?.name || 'Administrator',
-        role || 'admin',
-        'Assigned Cohort to Trainer',
-        `${selectedCohortToAssign} → ${selectedTrainer.fullName}`,
-        'Cohort',
-        `Assigned instructional lead for ${selectedCohortToAssign}.`
-      )
+    if (!selectedTrainer || !selectedCohortToAssign) return
+    setCohortError('')
+    const cohort = platformCohorts.find(item => item.id === selectedCohortToAssign)
+    if (!cohort?.app_course_id) { setCohortError('This cohort is not linked to an application course.'); return }
+    setCourseBusy(true)
+    try {
+      const response = await fetch(apiUrl(`/api/cohorts/${cohort.id}/trainer`), { method: 'PATCH', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ trainerId: selectedTrainer.id }) })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Unable to assign this cohort.')
+      setPlatformCohorts(current => current.map(item => item.id === cohort.id ? { ...item, trainer_id: selectedTrainer.id } : item))
+      logSystemActivity(profile?.full_name || user?.name || 'Administrator', role || 'admin', 'Assigned Cohort to Trainer', `${cohort.name} → ${selectedTrainer.fullName}`, 'Cohort', `Assigned ${cohort.name} to this trainer.`)
+      setIsAssignCohortModalOpen(false)
+    } catch (err) {
+      setCohortError(err instanceof Error ? err.message : 'Unable to assign this cohort.')
+    } finally {
+      setCourseBusy(false)
     }
-    setIsAssignCohortModalOpen(false)
   }
 
   // Action: Create Trainer
@@ -238,7 +250,7 @@ export function TrainersManagementPage() {
       specialty: editForm.specialty || 'General Digital Technology',
       status: 'active',
       courses: [selectedCourseToAssign],
-      cohorts: [selectedCohortToAssign],
+      cohorts: [selectedInitialCohort],
       studentsCount: 20,
       sessionsTotal: 12,
       sessionsCompleted: 0,
@@ -713,11 +725,16 @@ export function TrainersManagementPage() {
                     onChange={(e) => setSelectedCohortToAssign(e.target.value)}
                     className="input"
                   >
-                    <option value="Cohort A">Cohort A (Aug – Nov 2025)</option>
-                    <option value="Cohort B">Cohort B (Sep – Dec 2025)</option>
-                    <option value="Cohort C">Cohort C (Upcoming 2026)</option>
+                    <option value="">{cohortsLoading ? 'Loading created cohorts…' : 'Choose a created cohort'}</option>
+                    {platformCohorts.filter(cohort => cohort.app_course_id).map(cohort => (
+                      <option key={cohort.id} value={cohort.id}>
+                        {cohort.name} · {cohort.course_name}{cohort.starts_on ? ` · ${new Date(cohort.starts_on).toLocaleDateString()}` : ''}{cohort.ends_on ? ` – ${new Date(cohort.ends_on).toLocaleDateString()}` : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
+                {cohortError && <p role="alert" className="text-xs text-[var(--color-danger-600)]">{cohortError}</p>}
+                {!cohortsLoading && !cohortError && !platformCohorts.some(cohort => cohort.app_course_id) && <p className="text-xs text-[var(--color-ink-500)]">No created cohorts linked to a course were found.</p>}
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
@@ -728,9 +745,10 @@ export function TrainersManagementPage() {
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-1.5 bg-[var(--color-harbor-600)] text-white font-semibold rounded"
+                    disabled={!selectedCohortToAssign || courseBusy || cohortsLoading}
+                    className="px-4 py-1.5 bg-[var(--color-harbor-600)] text-white font-semibold rounded disabled:opacity-50"
                   >
-                    Assign Cohort
+                    {courseBusy ? 'Assigning…' : 'Assign Cohort'}
                   </button>
                 </div>
               </form>
@@ -1002,8 +1020,8 @@ export function TrainersManagementPage() {
                     Initial Cohort
                   </label>
                   <select
-                    value={selectedCohortToAssign}
-                    onChange={(e) => setSelectedCohortToAssign(e.target.value)}
+                    value={selectedInitialCohort}
+                    onChange={(e) => setSelectedInitialCohort(e.target.value)}
                     className="input"
                   >
                     <option value="Cohort A">Cohort A</option>

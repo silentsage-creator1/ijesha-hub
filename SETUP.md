@@ -15,6 +15,8 @@ key off the browser.
 2. Paste the entire contents of `supabase/schema.sql` from this repo.
 3. Click **Run**.
 4. Run `supabase/app-auth-migration.sql` in a new query.
+5. Run `supabase/cohort-trainer-assignment.sql` in a new query to enable
+   individual cohort assignments to trainers.
 
 This creates:
 - `profiles` — one row per logged-in user, holding their `role`

@@ -142,8 +142,9 @@ async function currentUser(request) {
 async function canTeachCohort(account, cohortId) {
   if(['admin','manager'].includes(account.role)) return true
   if(account.role !== 'trainer') return false
-  const c=await db.from('cohorts').select('app_course_id').eq('id',cohortId).maybeSingle()
+  const c=await db.from('cohorts').select('app_course_id,trainer_id').eq('id',cohortId).maybeSingle()
   if(c.error) throw c.error
+  if(c.data?.trainer_id) return c.data.trainer_id === account.id
   if(!c.data?.app_course_id) return false
   const course=await db.from('app_courses').select('trainer_id').eq('id',c.data.app_course_id).single()
   if(course.error) throw course.error
@@ -378,7 +379,7 @@ createServer(async (request, response) => {
     }
     if (request.method === 'POST' && request.url === '/api/students/assign-cohort') {
       const actor = await currentUser(request)
-      if (!actor || actor.role !== 'admin') return json(response, 403, { error: 'Administrator access is required.' }, cors)
+      if (!actor || !['admin','manager'].includes(actor.role)) return json(response, 403, { error: 'Administrator or manager access is required.' }, cors)
       const input = await body(request)
       const ids = [...new Set(Array.isArray(input.studentIds) ? input.studentIds : [])]
       if (!ids.length || ids.length > 100 || ids.some(id => typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id))) throw new Error('Select between 1 and 100 students.')
@@ -393,7 +394,7 @@ createServer(async (request, response) => {
         const key = typeof value === 'string' ? value.toLowerCase().replace(/[^a-z0-9]/g,'') : ''
         return ['frontenddevelopment','backenddevelopment','softwaredevelopment'].includes(key) ? 'softwaredevelopment' : key
       }
-      if (selectedStudents.data.length !== ids.length || selectedStudents.data.some(student => !trackKey(student.track) || trackKey(student.track) !== trackKey(course.data.title))) throw new Error('Choose a cohort matching every selected student’s existing course or track.')
+      if (selectedStudents.data.length !== ids.length || selectedStudents.data.some(student => trackKey(student.track) && trackKey(student.track) !== trackKey(course.data.title))) throw new Error('Choose a cohort matching every selected student’s existing course or track.')
       const accounts = await db.from('app_auth_users').select('id,student_id,role,approval_status').in('student_id', ids)
       if (accounts.error) throw accounts.error
       const results = []
@@ -473,14 +474,14 @@ createServer(async (request, response) => {
       if (request.method === 'POST') {
         if (!['admin','manager','trainer'].includes(actor.role)) return json(response,403,{error:'Staff access is required.'},cors)
         const input=await body(request)
-        const ids=[...new Set(Array.isArray(input.studentIds)?input.studentIds:[])]
+        const ids=[...new Set(Array.isArray(input.accountIds)?input.accountIds:[])]
         if(!ids.length || ids.length>100 || ids.some(id=>typeof id!=='string' || !/^[0-9a-f-]{36}$/i.test(id))) throw new Error('Select between 1 and 100 students.')
-        const [cohort, selected, accounts]=await Promise.all([
+        const [cohort, accounts]=await Promise.all([
           db.from('cohorts').select('id,app_course_id,ends_on').eq('id',cid).single(),
-          db.from('students').select('id,email,track').in('id',ids),
-          db.from('app_auth_users').select('id,student_id,email,role,approval_status').eq('role','student').eq('approval_status','approved'),
+          db.from('app_auth_users').select('id,student_id,email,full_name,track,role,approval_status,is_active').in('id',ids).eq('role','student').eq('approval_status','approved').neq('is_active',false),
         ])
-        for(const result of [cohort,selected,accounts]) if(result.error) throw result.error
+        for(const result of [cohort,accounts]) if(result.error) throw result.error
+        if(accounts.data.length!==ids.length) throw new Error('Only approved, active student accounts can be added.')
         if(!cohort.data.app_course_id || (cohort.data.ends_on && cohort.data.ends_on<new Date().toISOString().slice(0,10))) throw new Error('Choose a current or upcoming cohort linked to a course.')
         const course=await db.from('app_courses').select('title').eq('id',cohort.data.app_course_id).single()
         if(course.error) throw course.error
@@ -489,14 +490,13 @@ createServer(async (request, response) => {
           return ['frontenddevelopment','backenddevelopment','softwaredevelopment'].includes(key)?'softwaredevelopment':key
         }
         const expected=trackKey(course.data.title)
-        if(selected.data.length!==ids.length || selected.data.some(student=>!trackKey(student.track) || trackKey(student.track)!==expected)) throw new Error('Choose students whose existing course matches this cohort.')
         const results=[]
-        for(const studentId of ids) {
-          const student=selected.data.find(item=>item.id===studentId)
-          const account=accounts.data.find(item=>item.student_id===studentId || (student.email && item.email?.toLowerCase()===student.email.toLowerCase()))
-          if(!account) { results.push({studentId,error:'No approved linked student account.'}); continue }
+        for(const accountId of ids) {
+          const account=accounts.data.find(item=>item.id===accountId)
+          const accountTrack=trackKey(account.track)
+          if(accountTrack && accountTrack!==expected) { results.push({studentId:accountId,error:'This student account is registered for a different course.'}); continue }
           const result=await db.rpc('assign_app_student_cohort',{account_id:account.id,target_cohort_id:cid})
-          results.push({studentId,error:result.error?result.error.message:null})
+          results.push({studentId:accountId,error:result.error?result.error.message:null})
         }
         return json(response,200,{results},cors)
       }
@@ -521,9 +521,9 @@ createServer(async (request, response) => {
       if(!cohort.data.app_course_id) return json(response,200,{students:[]},cors)
       const [course,students,enrollments,accounts]=await Promise.all([
         db.from('app_courses').select('title').eq('id',cohort.data.app_course_id).single(),
-        db.from('students').select('id,full_name,email,track,status').order('full_name'),
+        db.from('students').select('id,email,track,status'),
         db.from('enrollments').select('student_id').eq('cohort_id',cid),
-        db.from('app_auth_users').select('id,student_id,email').eq('role','student').eq('approval_status','approved'),
+        db.from('app_auth_users').select('id,student_id,email,full_name,track').eq('role','student').eq('approval_status','approved').neq('is_active',false).order('full_name'),
       ])
       for(const result of [course,students,enrollments,accounts]) if(result.error) throw result.error
       const key=value=>{
@@ -531,7 +531,12 @@ createServer(async (request, response) => {
         return ['frontenddevelopment','backenddevelopment','softwaredevelopment'].includes(normalized)?'softwaredevelopment':normalized
       }
       const enrolled=new Set(enrollments.data.map(item=>item.student_id))
-      const available=students.data.filter(student=>!enrolled.has(student.id) && key(student.track)===key(course.data.title) && accounts.data.some(account=>account.student_id===student.id || (student.email && account.email?.toLowerCase()===student.email.toLowerCase())))
+      const available=accounts.data.filter(account=>{
+        const accountTrack=key(account.track)
+        if(accountTrack && accountTrack!==key(course.data.title)) return false
+        const linked=students.data.find(student=>student.id===account.student_id || (account.email && student.email?.toLowerCase()===account.email.toLowerCase()))
+        return !linked || !enrolled.has(linked.id)
+      }).map(account=>({id:account.id,full_name:account.full_name,email:account.email,track:account.track || null,status:'active'}))
       return json(response,200,{students:available},cors)
     }
     const attendanceMatch = request.url?.match(/^\/api\/attendance\/(cohorts|sessions)\/([0-9a-f-]{36})$/i)
@@ -676,10 +681,19 @@ createServer(async (request, response) => {
       if (!account || !['admin', 'manager', 'trainer'].includes(account.role)) return json(response, 403, { error: 'Staff access is required.' }, cors)
       let query = db.from('cohorts').select('*, app_courses!cohorts_app_course_id_fkey(title), courses(name)').order('name')
       if (account.role === 'trainer') {
-        const assigned = await db.from('app_courses').select('id').eq('trainer_id', account.id)
-        if (assigned.error) throw assigned.error
-        if (!assigned.data.length) return json(response, 200, { cohorts: [], enrollments: [] }, cors)
-        query = query.in('app_course_id', assigned.data.map(c => c.id))
+        const [assigned, direct] = await Promise.all([
+          db.from('app_courses').select('id').eq('trainer_id', account.id),
+          db.from('cohorts').select('id').eq('trainer_id', account.id),
+        ])
+        if (assigned.error || direct.error) throw assigned.error || direct.error
+        const visibleIds = new Set(direct.data.map(cohort => cohort.id))
+        if (assigned.data.length) {
+          const linked = await db.from('cohorts').select('id,trainer_id').in('app_course_id', assigned.data.map(course => course.id))
+          if (linked.error) throw linked.error
+          for (const cohort of linked.data) if (!cohort.trainer_id || cohort.trainer_id === account.id) visibleIds.add(cohort.id)
+        }
+        if (!visibleIds.size) return json(response, 200, { cohorts: [], enrollments: [] }, cors)
+        query = query.in('id', [...visibleIds])
       }
       const { data, error } = await query
       if (error) throw error
@@ -689,6 +703,20 @@ createServer(async (request, response) => {
         : { data: [], error: null }
       if (enrollmentResult.error) throw enrollmentResult.error
       return json(response, 200, { cohorts, enrollments: enrollmentResult.data }, cors)
+    }
+    const cohortTrainerMatch = request.url?.match(/^\/api\/cohorts\/([0-9a-f-]{36})\/trainer$/i)
+    if (request.method === 'PATCH' && cohortTrainerMatch) {
+      const account = await currentUser(request)
+      if (!account || !['admin','manager'].includes(account.role)) return json(response,403,{error:'Administrator or manager access is required.'},cors)
+      const input = await body(request)
+      const trainerId = typeof input.trainerId === 'string' ? input.trainerId : ''
+      if (!/^[0-9a-f-]{36}$/i.test(trainerId)) throw new Error('Choose a trainer account.')
+      const trainer = await db.from('app_auth_users').select('id,role,approval_status,is_active').eq('id',trainerId).single()
+      if (trainer.error) throw trainer.error
+      if (trainer.data.role !== 'trainer' || trainer.data.approval_status !== 'approved' || trainer.data.is_active === false) throw new Error('Choose an approved, active trainer.')
+      const result = await db.from('cohorts').update({trainer_id:trainerId}).eq('id',cohortTrainerMatch[1]).select('id,trainer_id').single()
+      if (result.error) throw result.error
+      return json(response,200,{cohort:result.data},cors)
     }
     if (request.method === 'POST' && request.url === '/api/cohorts') {
       const account = await currentUser(request)
@@ -709,9 +737,12 @@ createServer(async (request, response) => {
     if (request.method === 'DELETE' && cohortDeleteMatch) {
       const account = await currentUser(request)
       if (!account || !['admin', 'manager'].includes(account.role)) return json(response, 403, { error: 'Administrator or manager access is required.' }, cors)
-      const { error } = await db.from('cohorts').delete().eq('id', cohortDeleteMatch[1])
+      const input = await body(request)
+      if (input.confirmPermanent !== true || typeof input.cohortName !== 'string') return json(response, 400, { error: 'Refresh the page and confirm permanent cohort removal.' }, cors)
+      const { error } = await db.rpc('remove_app_cohort', { target_id: cohortDeleteMatch[1], expected_name: input.cohortName })
+      if (error?.code === 'PGRST202') return json(response, 503, { error: 'Cohort removal is not installed yet. Ask an administrator to run supabase/remove-app-cohort.sql. Nothing was deleted.' }, cors)
       if (error?.code === '23503') {
-        return json(response, 409, { error: 'This cohort still has linked enrollment or learning records, so it cannot be deleted. No records were removed. Keep the cohort to preserve student history, or ask an administrator to review its linked records before permanent removal.' }, cors)
+        return json(response, 409, { error: 'An additional linked record blocked removal. The entire operation was rolled back; no records were removed.' }, cors)
       }
       if (error) throw error
       return json(response, 200, { success: true }, cors)

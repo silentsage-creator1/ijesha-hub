@@ -228,7 +228,7 @@ export function CohortsPage() {
                 Are you sure you want to remove &quot;{cohortToDelete.name}&quot;?
               </p>
               <p className="text-xs text-red-700 leading-relaxed">
-                This permanently removes the cohort and any related records configured for automatic deletion. Protected linked records may block removal. This action cannot be undone.
+                Permanently delete this cohort, its enrollments, sessions, learning work, submissions, grades and attendance. User accounts, student profiles and courses will be kept. Students lose access to this cohort. This cannot be undone through the app.
               </p>
               {(() => {
                 const count = enrollments.filter((e) => e.cohort_id === cohortToDelete.id).length

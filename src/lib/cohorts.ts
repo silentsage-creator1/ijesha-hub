@@ -6,6 +6,7 @@ export interface Cohort {
   name: string
   course_id: string
   app_course_id?: string | null
+  trainer_id?: string | null
   course_name: string
   starts_on: string | null
   ends_on: string | null
@@ -40,9 +41,9 @@ export async function saveCohort(params: { name: string; course_id: string; star
     return { data: result.cohort, error: null }
   } catch (error) { return { data: null, error: error instanceof Error ? error.message : 'Unable to save cohort.' } }
 }
-export async function deleteCohort(id: string, _name?: string): Promise<{ error: string | null }> {
+export async function deleteCohort(id: string, name?: string): Promise<{ error: string | null }> {
   try {
-    await cohortRequest('/api/cohorts/' + encodeURIComponent(id), { method: 'DELETE' })
+    await cohortRequest('/api/cohorts/' + encodeURIComponent(id), { method: 'DELETE', body: JSON.stringify({ confirmPermanent: true, cohortName: name }) })
     window.dispatchEvent(new Event('cohorts-updated'))
     return { error: null }
   } catch (error) { return { error: error instanceof Error ? error.message : 'Unable to delete cohort.' } }
