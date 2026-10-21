@@ -452,6 +452,51 @@ createServer(async (request, response) => {
       }
       return json(response, 200, { student, details, photo }, cors)
     }
+    if (studentDetailMatch && request.method === 'PATCH') {
+      const actor = await currentUser(request)
+      if (!actor || !['admin', 'manager'].includes(actor.role)) return json(response, 403, { error: 'Administrator or manager access is required.' }, cors)
+      const input = await body(request)
+      const id = studentDetailMatch[1]
+      let lookup = await db.from('students').select('*').eq('id', id).maybeSingle()
+      if (lookup.error) throw lookup.error
+      if (!lookup.data) {
+        const account = await db.from('app_auth_users').select('student_id').eq('id', id).maybeSingle()
+        if (account.error) throw account.error
+        lookup = account.data?.student_id
+          ? await db.from('students').select('*').eq('id', account.data.student_id).maybeSingle()
+          : await db.from('students').select('*').eq('profile_id', id).maybeSingle()
+        if (lookup.error) throw lookup.error
+      }
+      if (!lookup.data) return json(response, 404, { error: 'Student record not found.' }, cors)
+      const student = lookup.data
+      const validStatuses = ['new', 'active', 'paused', 'graduated', 'withdrawn']
+      if (input.full_name !== undefined && (typeof input.full_name !== 'string' || !input.full_name.trim() || input.full_name.trim().length > 200)) throw new Error('Enter a student name up to 200 characters.')
+      if (input.email !== undefined && input.email !== null && (typeof input.email !== 'string' || input.email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email))) throw new Error('Enter a valid email address.')
+      if (input.track !== undefined && input.track !== null && (typeof input.track !== 'string' || input.track.length > 200)) throw new Error('Track must be 200 characters or fewer.')
+      if (input.status !== undefined && !validStatuses.includes(input.status)) throw new Error('Choose a valid student status.')
+
+      const studentPatch = {}
+      for (const field of ['full_name', 'email', 'track', 'status']) {
+        if (input[field] !== undefined) studentPatch[field] = field === 'email' ? (input[field]?.trim().toLowerCase() || null) : typeof input[field] === 'string' ? input[field].trim() : input[field]
+      }
+      const linkedAccounts = await db.from('app_auth_users').select('id').eq('student_id', student.id).eq('role', 'student')
+      if (linkedAccounts.error) throw linkedAccounts.error
+      let accountIds = linkedAccounts.data.map(account => account.id)
+      if (!accountIds.length && student.email) {
+        const byEmail = await db.from('app_auth_users').select('id').eq('email', student.email).eq('role', 'student')
+        if (byEmail.error) throw byEmail.error
+        accountIds = byEmail.data.map(account => account.id)
+      }
+      if (accountIds.length && ['full_name', 'email', 'track'].some(field => studentPatch[field] !== undefined)) {
+        const accountPatch = Object.fromEntries(['full_name', 'email', 'track'].filter(field => studentPatch[field] !== undefined).map(field => [field, studentPatch[field]]))
+        const accountUpdate = await db.from('app_auth_users').update(accountPatch).in('id', accountIds)
+        if (accountUpdate.error) throw accountUpdate.error
+      }
+      const updated = await db.from('students').update(studentPatch).eq('id', student.id).select('*').maybeSingle()
+      if (updated.error) throw updated.error
+      if (!updated.data) return json(response, 404, { error: 'Student record not found.' }, cors)
+      return json(response, 200, { student: updated.data }, cors)
+    }
     const assignCohortMatch = request.url?.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})\/cohort$/i)
     if(assignCohortMatch && request.method === 'PATCH') {
       const actor = await currentUser(request)

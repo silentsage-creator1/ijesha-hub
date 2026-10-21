@@ -112,18 +112,20 @@ export function StudentDetailPage() {
     const payload = {
       full_name: form.full_name.trim(),
       email: form.email.trim() || null,
-      cohort: form.cohort.trim() || null,
       track: form.track.trim() || null,
       status: form.status,
     }
-    const { data, error } = await supabase.from('students').update(payload).eq('id', student.id).select().single()
-    setSaving(false)
-    if (error) {
-      setFormError(error.message)
-      return
+    try {
+      const result = await cohortRequest<{ student: Student }>(`/api/students/${encodeURIComponent(student.id)}`, {
+        method: 'PATCH', body: JSON.stringify(payload),
+      })
+      setStudent(result.student)
+      setModalOpen(false)
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Unable to save student details.')
+    } finally {
+      setSaving(false)
     }
-    setStudent(data as Student)
-    setModalOpen(false)
   }
 
   async function handleDelete() {
@@ -283,7 +285,7 @@ export function StudentDetailPage() {
                 <input className="input" value={form.track} onChange={(e) => setForm({ ...form, track: e.target.value })} />
               </Field>
               <Field label="Cohort">
-                <input className="input" value={form.cohort} onChange={(e) => setForm({ ...form, cohort: e.target.value })} />
+                <input className="input" value={form.cohort} readOnly />
               </Field>
             </div>
             <Field label="Status">
