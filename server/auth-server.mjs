@@ -466,10 +466,40 @@ createServer(async (request, response) => {
       return json(response,200,{message:'Student assigned to cohort successfully.'},cors)
     }
     const cohortStudentsMatch = request.url?.match(/^\/api\/cohorts\/([0-9a-f-]{36})\/students$/i)
-    if (cohortStudentsMatch && request.method === 'GET') {
+    if (cohortStudentsMatch && ['GET','POST'].includes(request.method)) {
       const actor=await currentUser(request)
       if(!actor || !await canTeachCohort(actor,cohortStudentsMatch[1])) return json(response,403,{error:'This cohort is not assigned to you.'},cors)
       const cid=cohortStudentsMatch[1]
+      if (request.method === 'POST') {
+        if (!['admin','manager','trainer'].includes(actor.role)) return json(response,403,{error:'Staff access is required.'},cors)
+        const input=await body(request)
+        const ids=[...new Set(Array.isArray(input.studentIds)?input.studentIds:[])]
+        if(!ids.length || ids.length>100 || ids.some(id=>typeof id!=='string' || !/^[0-9a-f-]{36}$/i.test(id))) throw new Error('Select between 1 and 100 students.')
+        const [cohort, selected, accounts]=await Promise.all([
+          db.from('cohorts').select('id,app_course_id,ends_on').eq('id',cid).single(),
+          db.from('students').select('id,email,track').in('id',ids),
+          db.from('app_auth_users').select('id,student_id,email,role,approval_status').eq('role','student').eq('approval_status','approved'),
+        ])
+        for(const result of [cohort,selected,accounts]) if(result.error) throw result.error
+        if(!cohort.data.app_course_id || (cohort.data.ends_on && cohort.data.ends_on<new Date().toISOString().slice(0,10))) throw new Error('Choose a current or upcoming cohort linked to a course.')
+        const course=await db.from('app_courses').select('title').eq('id',cohort.data.app_course_id).single()
+        if(course.error) throw course.error
+        const trackKey=value=>{
+          const key=typeof value==='string'?value.toLowerCase().replace(/[^a-z0-9]/g,''):''
+          return ['frontenddevelopment','backenddevelopment','softwaredevelopment'].includes(key)?'softwaredevelopment':key
+        }
+        const expected=trackKey(course.data.title)
+        if(selected.data.length!==ids.length || selected.data.some(student=>!trackKey(student.track) || trackKey(student.track)!==expected)) throw new Error('Choose students whose existing course matches this cohort.')
+        const results=[]
+        for(const studentId of ids) {
+          const student=selected.data.find(item=>item.id===studentId)
+          const account=accounts.data.find(item=>item.student_id===studentId || (student.email && item.email?.toLowerCase()===student.email.toLowerCase()))
+          if(!account) { results.push({studentId,error:'No approved linked student account.'}); continue }
+          const result=await db.rpc('assign_app_student_cohort',{account_id:account.id,target_cohort_id:cid})
+          results.push({studentId,error:result.error?result.error.message:null})
+        }
+        return json(response,200,{results},cors)
+      }
       const [enrollments,attendance,items]=await Promise.all([
         db.from('enrollments').select('id,student_id,completion_status,students(id,full_name,status,track)').eq('cohort_id',cid),
         db.from('attendance').select('student_id,status').eq('cohort_id',cid),
@@ -480,6 +510,29 @@ createServer(async (request, response) => {
       if(submissions.error) throw submissions.error
       const progress=enrollments.data.map(e=>({student_id:e.student_id,progress_percent:items.data.length?Math.round(100*submissions.data.filter(s=>s.student_id===e.student_id).length/items.data.length):0}))
       return json(response,200,{enrollments:enrollments.data,attendance:attendance.data,progress},cors)
+    }
+    const cohortAvailableStudentsMatch=request.url?.match(/^\/api\/cohorts\/([0-9a-f-]{36})\/available-students$/i)
+    if(cohortAvailableStudentsMatch && request.method==='GET') {
+      const actor=await currentUser(request)
+      const cid=cohortAvailableStudentsMatch[1]
+      if(!actor || !await canTeachCohort(actor,cid)) return json(response,403,{error:'This cohort is not assigned to you.'},cors)
+      const cohort=await db.from('cohorts').select('id,app_course_id').eq('id',cid).single()
+      if(cohort.error) throw cohort.error
+      if(!cohort.data.app_course_id) return json(response,200,{students:[]},cors)
+      const [course,students,enrollments,accounts]=await Promise.all([
+        db.from('app_courses').select('title').eq('id',cohort.data.app_course_id).single(),
+        db.from('students').select('id,full_name,email,track,status').order('full_name'),
+        db.from('enrollments').select('student_id').eq('cohort_id',cid),
+        db.from('app_auth_users').select('id,student_id,email').eq('role','student').eq('approval_status','approved'),
+      ])
+      for(const result of [course,students,enrollments,accounts]) if(result.error) throw result.error
+      const key=value=>{
+        const normalized=typeof value==='string'?value.toLowerCase().replace(/[^a-z0-9]/g,''):''
+        return ['frontenddevelopment','backenddevelopment','softwaredevelopment'].includes(normalized)?'softwaredevelopment':normalized
+      }
+      const enrolled=new Set(enrollments.data.map(item=>item.student_id))
+      const available=students.data.filter(student=>!enrolled.has(student.id) && key(student.track)===key(course.data.title) && accounts.data.some(account=>account.student_id===student.id || (student.email && account.email?.toLowerCase()===student.email.toLowerCase())))
+      return json(response,200,{students:available},cors)
     }
     const attendanceMatch = request.url?.match(/^\/api\/attendance\/(cohorts|sessions)\/([0-9a-f-]{36})$/i)
     if(attendanceMatch && ['GET','PATCH'].includes(request.method)) {
